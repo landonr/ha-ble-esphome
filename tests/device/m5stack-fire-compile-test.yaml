@@ -1,0 +1,30 @@
+# Classic-ESP32 compile target: M5Stack Fire.
+# Proves the api_ble component compiles on a Bluedroid classic-ESP32 variant
+# (the C6 is a RISC-V/newer-radio target). Display/menu YAML is out of scope.
+# Native API over BLE only -- NO wifi and NO api component.
+esphome:
+  name: hable-m5-fire
+
+esp32:
+  board: m5stack-fire
+  framework:
+    type: esp-idf
+
+logger:
+
+esp32_ble:
+
+esp32_ble_server:
+
+api_ble:
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# One api_ble HA-import sensor exercises the state-import path on classic ESP32.
+sensor:
+  - platform: api_ble
+    name: "Office Thermostat Local Temperature"
+    entity_id: sensor.office_thermostat_local_temperature

@@ -1,0 +1,93 @@
+# Full feature-coverage test: Seeed XIAO ESP32-C6 over USB.
+# Exercises every phase-2 api_ble path: ListEntities/SubscribeStates for
+# template binary_sensor/sensor/text_sensor/switch/light, the api_ble
+# sensor/text_sensor HA-import platforms, and a homeassistant.action call.
+# Native API over BLE only -- NO wifi and NO api component.
+esphome:
+  name: hable-feature-test
+
+esp32:
+  board: seeed_xiao_esp32c6
+  framework:
+    type: esp-idf
+
+logger:
+
+esp32_ble:
+
+esp32_ble_server:
+
+api_ble:
+  on_client_connected:
+    - logger.log:
+        format: "api_ble client connected: %s"
+        args: ["client_info.c_str()"]
+  on_client_disconnected:
+    - logger.log: "api_ble client disconnected"
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+binary_sensor:
+  - platform: template
+    name: "Feature Binary Sensor"
+    id: feature_binary_sensor
+    device_class: motion
+    lambda: |-
+      return (millis() / 1000) % 2 == 0;
+
+sensor:
+  - platform: template
+    name: "Feature Sensor"
+    id: feature_sensor
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    lambda: |-
+      return (millis() % 100000) / 1000.0;
+    update_interval: 10s
+
+  # HA state import (device consumes a HA entity's numeric state).
+  - platform: api_ble
+    name: "Office Thermostat Local Temperature"
+    entity_id: sensor.office_thermostat_local_temperature
+
+text_sensor:
+  - platform: template
+    name: "Feature Text Sensor"
+    id: feature_text_sensor
+    lambda: |-
+      return std::string("hable");
+    update_interval: 60s
+
+  # HA state import (device consumes a HA entity's string state).
+  - platform: api_ble
+    name: "Home Weather"
+    entity_id: weather.forecast_home
+
+switch:
+  - platform: template
+    name: "Feature Switch"
+    id: feature_switch
+    optimistic: true
+    turn_on_action:
+      # Device-originated Home Assistant action (forwarded to the connected,
+      # service-subscribed client).
+      - homeassistant.action:
+          action: light.turn_on
+          data:
+            entity_id: light.office_lamp_corner
+
+output:
+  - platform: gpio
+    id: feature_light_output
+    pin: GPIO15
+
+light:
+  - platform: binary
+    name: "Feature Light"
+    id: feature_light
+    output: feature_light_output

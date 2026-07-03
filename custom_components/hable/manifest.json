@@ -1,0 +1,20 @@
+{
+  "domain": "hable",
+  "name": "Hable (ESPHome API over BLE)",
+  "after_dependencies": ["esphome"],
+  "bluetooth": [
+    {
+      "service_uuid": "ab1e0001-e5b0-4c8e-a9f3-6b5c2d3e4f01"
+    }
+  ],
+  "codeowners": ["@landonrohatensky"],
+  "config_flow": true,
+  "dependencies": ["bluetooth_adapters"],
+  "documentation": "https://github.com/landonrohatensky/hable",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "issue_tracker": "https://github.com/landonrohatensky/hable/issues",
+  "loggers": ["bleak", "bleak_retry_connector"],
+  "requirements": ["bleak-retry-connector"],
+  "version": "0.1.0"
+}

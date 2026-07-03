@@ -1,0 +1,29 @@
+# XIAO ESP32-C6 as a standard ESPHome Bluetooth proxy (WiFi-connected),
+# giving HA a BLE radio within range of the hable device.
+esphome:
+  name: hable-bt-proxy
+  friendly_name: Hable BT Proxy
+
+esp32:
+  board: seeed_xiao_esp32c6
+  framework:
+    type: esp-idf
+
+logger:
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+api:
+
+ota:
+  - platform: esphome
+    password: !secret ota_encryption
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+
+bluetooth_proxy:
+  active: true

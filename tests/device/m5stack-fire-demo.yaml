@@ -1,0 +1,213 @@
+# M5Stack Fire demo: native API over BLE with a button-driven display menu.
+# Menu: office lamp on/off (via homeassistant.action), office temperature and
+# weather state imported from HA over the BLE API. Buttons: A=up, B=down,
+# C=select. Deliberately NO wifi and NO api component.
+esphome:
+  name: hable-m5fire
+  friendly_name: Hable M5 Fire
+
+esp32:
+  board: m5stack-fire
+  framework:
+    type: esp-idf
+
+psram:
+
+logger:
+
+esp32_ble:
+
+esp32_ble_server:
+
+api_ble:
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+spi:
+  clk_pin: GPIO18
+  mosi_pin: GPIO23
+  miso_pin: GPIO19
+
+output:
+  - platform: ledc
+    pin: GPIO32
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    id: backlight
+    name: "Backlight"
+    restore_mode: ALWAYS_ON
+  # Side LED bars — a local light entity HA can command over BLE.
+  - platform: esp32_rmt_led_strip
+    pin: GPIO15
+    num_leds: 10
+    chipset: SK6812
+    rgb_order: GRB
+    id: led_bars
+    name: "LED Bars"
+
+font:
+  - file: gfonts://Roboto@500
+    id: font_menu
+    size: 20
+
+# HA states imported over the BLE API.
+sensor:
+  - platform: api_ble
+    id: office_temp
+    entity_id: sensor.office_thermostat_local_temperature
+    on_value:
+      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+
+text_sensor:
+  - platform: api_ble
+    id: weather_state
+    entity_id: weather.forecast_home
+    on_value:
+      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+  - platform: api_ble
+    id: spotify_state
+    entity_id: media_player.spotify_landorghini
+    on_value:
+      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+  - platform: api_ble
+    id: spotify_title
+    entity_id: media_player.spotify_landorghini
+    attribute: media_title
+    on_value:
+      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+
+# Spotify volume 0-100, pushed to HA on change.
+number:
+  - platform: template
+    id: spotify_volume
+    name: "Spotify Volume"
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 25
+    optimistic: true
+    set_action:
+      - homeassistant.action:
+          action: media_player.volume_set
+          data:
+            entity_id: media_player.spotify_landorghini
+            volume_level: !lambda |-
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%.2f", x / 100.0f);
+              return std::string(buf);
+
+# Local switch mirroring the office lamp; drives it via homeassistant.action.
+switch:
+  - platform: template
+    id: office_lamp
+    name: "Office Lamp"
+    optimistic: true
+    turn_on_action:
+      - homeassistant.action:
+          action: light.turn_on
+          data:
+            entity_id: light.office_lamp_corner
+    turn_off_action:
+      - homeassistant.action:
+          action: light.turn_off
+          data:
+            entity_id: light.office_lamp_corner
+
+binary_sensor:
+  # GPIO 37-39 are input-only with external pull-ups on the Fire.
+  - platform: gpio
+    pin:
+      number: GPIO39
+      inverted: true
+      mode:
+        input: true
+    id: btn_a
+    name: "Button A"
+    on_press:
+      - display_menu.up: main_menu
+  - platform: gpio
+    pin:
+      number: GPIO38
+      inverted: true
+      mode:
+        input: true
+    id: btn_b
+    name: "Button B"
+    on_press:
+      - display_menu.enter: main_menu
+  - platform: gpio
+    pin:
+      number: GPIO37
+      inverted: true
+      mode:
+        input: true
+    id: btn_c
+    name: "Button C"
+    on_press:
+      - display_menu.down: main_menu
+
+graphical_display_menu:
+  id: main_menu
+  display: m5_display
+  font: font_menu
+  active: true
+  items:
+    - type: switch
+      text: "Office Lamp"
+      switch: office_lamp
+      on_text: "ON"
+      off_text: "OFF"
+    - type: label
+      text: !lambda |-
+        if (isnan(id(office_temp).state))
+          return std::string("Office: --.- C");
+        char buf[32];
+        snprintf(buf, sizeof(buf), "Office: %.1f C", id(office_temp).state);
+        return std::string(buf);
+    - type: label
+      text: !lambda |-
+        std::string w = id(weather_state).state;
+        if (w.empty())
+          w = "--";
+        return "Weather: " + w;
+    - type: label
+      text: !lambda |-
+        std::string s = id(spotify_state).state;
+        if (s.empty())
+          s = "--";
+        return "Spotify: " + s;
+    - type: label
+      text: !lambda |-
+        std::string t = id(spotify_title).state;
+        if (t.empty())
+          t = "--";
+        if (t.size() > 22)
+          t = t.substr(0, 21) + "~";
+        return "> " + t;
+    - type: command
+      text: "Spotify Play/Pause"
+      on_value:
+        - homeassistant.action:
+            action: media_player.media_play_pause
+            data:
+              entity_id: media_player.spotify_landorghini
+    - type: number
+      text: "Spotify Vol"
+      number: spotify_volume
+      format: "%.0f"
+
+display:
+  - platform: ili9xxx
+    model: M5STACK
+    id: m5_display
+    cs_pin: GPIO14
+    dc_pin: GPIO27
+    reset_pin: GPIO33
+    invert_colors: false
+    update_interval: 1s

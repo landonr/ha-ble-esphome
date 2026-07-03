@@ -1,0 +1,15 @@
+# Secrets — never commit
+.mcp.json
+tests/device/secrets.yaml
+**/secrets.yaml
+
+# Build artifacts
+tests/device/.esphome/
+.esphome/
+__pycache__/
+*.pyc
+
+# Local tooling
+tools/.venv/
+.claude/
+.DS_Store

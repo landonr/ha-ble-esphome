@@ -1,0 +1,72 @@
+# Device test config: Seeed XIAO ESP32-C6 over USB.
+# Native API over BLE only -- deliberately NO wifi and NO api component.
+esphome:
+  name: hable-test
+
+esp32:
+  board: seeed_xiao_esp32c6
+  framework:
+    type: esp-idf
+
+logger:  # default UART
+
+esp32_ble:
+
+# Required explicitly: api_ble declares esp32_ble_server in DEPENDENCIES
+# (not AUTO_LOAD), so it must appear in the config.
+esp32_ble_server:
+
+api_ble:
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+# Template entities exercising state publishing (list/subscribe/command paths).
+binary_sensor:
+  - platform: template
+    name: "Test Binary Sensor"
+    id: test_binary_sensor
+    device_class: motion
+    lambda: |-
+      return (millis() / 1000) % 2 == 0;
+
+sensor:
+  - platform: template
+    name: "Test Sensor"
+    id: test_sensor
+    unit_of_measurement: "°C"
+    accuracy_decimals: 1
+    device_class: temperature
+    state_class: measurement
+    lambda: |-
+      return (millis() % 100000) / 1000.0;
+    update_interval: 10s
+
+text_sensor:
+  - platform: template
+    name: "Test Text Sensor"
+    id: test_text_sensor
+    lambda: |-
+      return std::string("hable");
+    update_interval: 60s
+
+switch:
+  - platform: template
+    name: "Test Switch"
+    id: test_switch
+    optimistic: true
+
+# Trivial light (binary, backed by a gpio output) to exercise the light
+# ListEntities/state/command code paths.
+output:
+  - platform: gpio
+    id: test_light_output
+    pin: GPIO15
+
+light:
+  - platform: binary
+    name: "Test Light"
+    id: test_light
+    output: test_light_output
