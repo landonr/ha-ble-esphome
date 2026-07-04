@@ -122,3 +122,68 @@ entity logic; hable creates/repoints its config entry at `127.0.0.1:<port>`).
 - The companion esphome entry is created programmatically via the esphome
   user config flow (`{host, port}`); `allow_service_calls` must be enabled on
   it for `homeassistant.action` to execute.
+
+## ESPHome conventions (`components/api_ble` is upstreamable — follow these)
+
+`api_ble` is written to eventually merge into ESPHome, so its C++ and Python
+must read like core ESPHome code. The upstream ESPHome AI collaboration guide
+is the full reference; the load-bearing rules for this component:
+
+### C++ style
+
+- Follow the Google C++ Style Guide as clang-tidy enforces it: functions /
+  methods / variables `lower_snake_case`, classes / structs / enums
+  `UpperCamelCase`, namespace-scope constants `UPPER_SNAKE_CASE`, function-local
+  constants `lower_snake_case`, protected/private fields
+  `lower_snake_case_with_trailing_underscore_`.
+- Prefix **all** member access with `this->`. Two-space indent, no tabs, wrap
+  at 120 cols. `using x = y;` not `typedef`. `gnu++20`.
+- Fields default to `protected` for testability; use `private` only when direct
+  access could break an invariant (synced fields, validated pointer lifetimes,
+  setters that do cleanup/registration). Expose `protected` accessors when
+  subclasses need controlled access.
+- Required + invariant dependencies go through the constructor, not setters —
+  no half-initialized objects.
+- No `#define` for constants (use `const`/`enum`); `#define` only for
+  conditional compilation and code-gen-computed sizes (`cg.add_define`). New
+  `USE_*` gates must also be added to `~/dev/esphome/esphome/core/defines.h` for
+  static analysis / IDE support.
+
+### Heap & containers (embedded — this is a reliability rule, not perf)
+
+- **No heap allocation after `setup()`** unless truly unavoidable. Fragmentation
+  from repeated runtime alloc/free is a known field-crash source. This is why
+  the TX path is a fixed ring, not a growing buffer — keep it that way.
+- Container choices: compile-time size → `std::array`; byte buffers →
+  `std::unique_ptr<uint8_t[]>` or `std::array`, not `std::vector<uint8_t>`;
+  fixed size with `push_back` → `StaticVector` (compile-time) / `FixedVector`
+  (runtime-init), both in `esphome/core/helpers.h`; small lookups (≤16) → flat
+  `std::vector`/`std::array` of structs, never `std::map`/`set`/`unordered_map`.
+  Never `std::deque` (512-byte blocks).
+- Callback registration methods must be templatized (`template<typename F>`),
+  never take `std::function` — that forces heap wrapping of forwarder structs.
+  Prefer `LazyCallbackManager` (4 B idle) over `CallbackManager` (12 B) when
+  subscribers are usually absent.
+- Watch compiler symbols for regressions: `_M_realloc_insert`,
+  `_M_default_append`, `_Rb_tree`, `unordered_map`/`hash` = accidental STL bloat.
+
+### Python / code-gen
+
+- Prefer the walrus operator to avoid double lookups:
+  `if (v := config.get(CONF_X)) is not None:`.
+- Component state during code-gen lives in `CORE.data[DOMAIN]` (a `@dataclass`),
+  never module-level mutable globals — the latter leak between compile runs.
+- Schema pattern: `CONF_*` constants, `cv` validators, `.extend(cv.COMPONENT_SCHEMA)`.
+  New entity types keep the existing triple (Info encoder / state encoder +
+  Controller hook / command decoder) gated by the type's `USE_*` define.
+
+### Testing & contribution
+
+- Validate and compile through the pinned CLI (`~/dev/esphome/venv/bin/esphome`),
+  never `pip install esphome`. Compile coverage gates both chip families (see
+  Commands). `esphome config` is the fast schema check; `compile` is the real
+  gate.
+- If/when upstreaming: branch from `dev`, PR title prefixed `[api_ble]`, run
+  `pre-commit` (ruff/flake8 + clang-format), fill out the PR template. Breaking
+  changes to core/base classes need a deprecation window and a documented
+  migration path.
