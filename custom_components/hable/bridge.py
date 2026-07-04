@@ -28,15 +28,13 @@ from .const import (
     DEFAULT_MTU,
     FLOW_CONTROL_WRITE_INTERVAL,
     MIN_CHUNK_SIZE,
+    RECONNECT_BACKOFF,
     RX_CHAR_UUID,
+    TCP_WRITE_HIGH_WATER,
     TX_CHAR_UUID,
 )
 
 _LOGGER = logging.getLogger(__name__)
-
-# Fallback reconnect poll while disconnected, in case the advertisement
-# callback never fires (observed with proxy-relayed advertisements).
-RECONNECT_FALLBACK_INTERVAL = 30.0
 
 
 class HableBridgeError(Exception):
@@ -71,6 +69,9 @@ class HableBridge:
         # Cancel handles for the reconnect triggers.
         self._cancel_adv_callback: Any | None = None
         self._cancel_fallback_timer: Any | None = None
+        # Failed reconnect attempts since the BLE drop; indexes into
+        # RECONNECT_BACKOFF (reset on successful connect).
+        self._reconnect_attempt = 0
 
         # Diagnostics counters.
         self.bytes_ble_to_tcp = 0
@@ -174,6 +175,7 @@ class HableBridge:
                 return
 
             self._client = client
+            self._reconnect_attempt = 0
             self._async_cancel_reconnect_triggers()
             _LOGGER.info(
                 "%s: BLE connected (mtu=%s)", self._address, client.mtu_size
@@ -189,10 +191,17 @@ class HableBridge:
             return
         self.bytes_ble_to_tcp += len(data)
         writer.write(bytes(data))
-        # TODO: backpressure. writer.drain() is async and this callback is
-        # sync; if the TCP peer stalls, bytes buffer unboundedly in the
-        # transport. Track transport.get_write_buffer_size() and pause
-        # notifications / drop the client past a high-water mark.
+        # Backpressure: writer.drain() is async and this callback is sync, so
+        # a stalled TCP peer would buffer bytes unboundedly in the transport.
+        # Past the high-water mark the client is unhealthy -- drop it and let
+        # the esphome integration reconnect (protocol restarts from Hello).
+        if writer.transport.get_write_buffer_size() > TCP_WRITE_HIGH_WATER:
+            _LOGGER.warning(
+                "%s: TCP client stalled (>%d bytes buffered); dropping client",
+                self._address,
+                TCP_WRITE_HIGH_WATER,
+            )
+            self._async_close_tcp_client()
 
     def _on_ble_disconnected(self, client: BleakClient) -> None:
         """Handle BLE disconnect (bleak disconnected_callback)."""
@@ -217,7 +226,7 @@ class HableBridge:
 
     @callback
     def _async_arm_reconnect_triggers(self) -> None:
-        """Arm the advertisement callback and the fallback timer."""
+        """Arm the advertisement callback and the backoff fallback timer."""
         if self._stopping:
             return
         if self._cancel_adv_callback is None:
@@ -228,8 +237,11 @@ class HableBridge:
                 bluetooth.BluetoothScanningMode.ACTIVE,
             )
         if self._cancel_fallback_timer is None:
+            delay = RECONNECT_BACKOFF[
+                min(self._reconnect_attempt, len(RECONNECT_BACKOFF) - 1)
+            ]
             self._cancel_fallback_timer = async_call_later(
-                self._hass, RECONNECT_FALLBACK_INTERVAL, self._async_fallback_tick
+                self._hass, delay, self._async_fallback_tick
             )
 
     @callback
@@ -253,15 +265,15 @@ class HableBridge:
 
     @callback
     def _async_fallback_tick(self, _now: Any) -> None:
-        """Periodic fallback: retry even without an advertisement."""
+        """Backoff fallback: retry even without an advertisement.
+
+        No self-rearm here: the attempt's failure path re-arms with the next
+        backoff delay, and success cancels the triggers.
+        """
         self._cancel_fallback_timer = None
         if self._stopping or self.ble_connected:
             return
         self._async_schedule_reconnect()
-        # Re-arm for the next interval; cancelled on successful connect.
-        self._cancel_fallback_timer = async_call_later(
-            self._hass, RECONNECT_FALLBACK_INTERVAL, self._async_fallback_tick
-        )
 
     @callback
     def _async_schedule_reconnect(self) -> None:
@@ -277,10 +289,12 @@ class HableBridge:
         try:
             await self._async_connect_ble()
         except HableBridgeError as err:
+            self._reconnect_attempt += 1
             _LOGGER.warning(
-                "%s: BLE reconnect failed (%s); triggers stay armed",
+                "%s: BLE reconnect failed (%s); retry in backoff (attempt %d)",
                 self._address,
                 err,
+                self._reconnect_attempt,
             )
             self._async_arm_reconnect_triggers()
 

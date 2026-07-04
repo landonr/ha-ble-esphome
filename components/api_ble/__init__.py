@@ -175,8 +175,8 @@ async def to_code(config):
     if (encryption_config := config.get(CONF_ENCRYPTION)) is not None:
         decoded = base64.b64decode(encryption_config[CONF_KEY])
         cg.add(var.set_noise_psk(list(decoded)))
-        # Noise frame handling itself is phase 3 -- this define only gates
-        # future code paths.
+        # With a PSK configured the connection requires Noise frames and
+        # rejects plaintext clients (in-tree semantics). See noise_session.h.
         cg.add_define("USE_API_BLE_NOISE")
         cg.add_library("esphome/noise-c", "0.1.11")
 

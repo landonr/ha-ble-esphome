@@ -66,7 +66,8 @@ void APIBLEServer::loop() {
 
   if (this->connection_ != nullptr) {
     this->connection_->loop();
-    this->connection_->pipe().drain(this->tx_char_, this->mtu_);
+    this->connection_->pipe().drain(global_ble_server->get_gatts_if(), this->conn_id_, this->tx_char_handle_,
+                                    this->mtu_, this->congested_);
     if (this->connection_->should_close() &&
         (!this->connection_->close_after_flush() || this->connection_->pipe().tx_empty())) {
       const uint16_t conn_id = this->conn_id_;
@@ -130,6 +131,22 @@ void APIBLEServer::gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t
       ESP_LOGD(TAG, "MTU negotiated: %u (conn %u)", param->mtu.mtu, param->mtu.conn_id);
       break;
     }
+    case ESP_GATTS_ADD_CHAR_EVT: {
+      // Capture the TX characteristic's attribute handle: the wrapper's
+      // BLECharacteristic keeps it protected, and the drain path needs it
+      // for direct esp_ble_gatts_send_indicate calls.
+      if (this->service_ != nullptr && param->add_char.service_handle == this->service_->get_handle() &&
+          ESPBTUUID::from_uuid(param->add_char.char_uuid) == ESPBTUUID::from_raw(TX_CHARACTERISTIC_UUID)) {
+        this->tx_char_handle_ = param->add_char.attr_handle;
+      }
+      break;
+    }
+    case ESP_GATTS_CONGEST_EVT: {
+      // Real TX flow control: the drain pauses while the stack is congested.
+      this->congested_ = param->congest.congested;
+      ESP_LOGV(TAG, "Congestion %s (conn %u)", this->congested_ ? "start" : "end", param->congest.conn_id);
+      break;
+    }
     case ESP_GATTS_ADD_CHAR_DESCR_EVT: {
       // Capture the handle of our TX CCCD so we can spot subscription writes.
       if (this->service_ != nullptr && param->add_char_descr.service_handle == this->service_->get_handle() &&
@@ -175,6 +192,7 @@ void APIBLEServer::on_ble_disconnect_(uint16_t conn_id) {
   this->close_session_();
   this->conn_id_ = INVALID_CONN_ID;
   this->mtu_ = DEFAULT_MTU;
+  this->congested_ = false;
 }
 
 void APIBLEServer::open_session_(uint16_t conn_id) {
@@ -290,7 +308,7 @@ void APIBLEServer::dump_config() {
                 SERVICE_UUID, this->conn_min_interval_ms_, this->conn_max_interval_ms_, this->conn_latency_,
                 this->conn_timeout_ms_, this->reboot_timeout_);
 #ifdef USE_API_BLE_NOISE
-  ESP_LOGCONFIG(TAG, "  Encryption: Noise PSK configured (frame support is phase 2)");
+  ESP_LOGCONFIG(TAG, "  Encryption: Noise (PSK configured, plaintext rejected)");
 #else
   ESP_LOGCONFIG(TAG, "  Encryption: none (plaintext)");
 #endif

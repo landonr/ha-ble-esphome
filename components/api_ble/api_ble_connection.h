@@ -9,6 +9,11 @@
 #include "proto.h"
 #include "api_pb2.h"
 
+#ifdef USE_API_BLE_NOISE
+#include "noise_session.h"
+#include <memory>
+#endif
+
 #include <cstdint>
 #include <string>
 
@@ -43,8 +48,11 @@ static constexpr uint32_t KEEPALIVE_DISCONNECT_TIMEOUT_MS = (KEEPALIVE_TIMEOUT_M
 
 /// Native API connection state machine over a BLEBytePipe.
 ///
-/// Plaintext frames only (indicator 0x00 + varint size + varint type). Noise
-/// framing (indicator 0x01) is phase 3, gated by USE_API_BLE_NOISE.
+/// Without encryption: plaintext frames (indicator 0x00 + varint size +
+/// varint type). With `encryption: key:` configured (USE_API_BLE_NOISE) the
+/// connection requires Noise frames (indicator 0x01) and delegates the
+/// handshake and payload crypto to NoiseSession -- mirroring the in-tree
+/// rule that a configured PSK makes encryption mandatory.
 class APIBLEConnection {
  public:
   explicit APIBLEConnection(APIBLEServer *server);
@@ -106,10 +114,16 @@ class APIBLEConnection {
   void send_homeassistant_action(const api::HomeassistantActionRequest &req);
 
  protected:
+#ifdef USE_API_BLE_NOISE
+  /// Noise header: 1 (indicator) + 2 (u16 size) + 2 (u16 type) + 2 (u16
+  /// data_len); fixed size, payload follows immediately.
+  static constexpr size_t FRAME_HEADER_PADDING = NoiseSession::HEADER_PADDING;
+#else
   /// Max plaintext header: 1 (indicator) + up to 3 (varint16 size) + up to 2
   /// (varint8 type). Same layout idea as the api component's HEADER_PADDING;
   /// the header is right-justified so it sits immediately before the payload.
   static constexpr size_t FRAME_HEADER_PADDING = 6;
+#endif
   /// Reject frames larger than this (matches the intent of the api
   /// component's rx limits; BLE MVP messages are far smaller).
   static constexpr uint32_t MAX_RX_FRAME_SIZE = 8192;
@@ -176,6 +190,9 @@ class APIBLEConnection {
   APIBLEServer *server_;
   BLEBytePipe pipe_;
   api::APIBuffer tx_buf_;
+#ifdef USE_API_BLE_NOISE
+  std::unique_ptr<NoiseSession> noise_;
+#endif
 
   std::string client_info_;
   uint32_t last_traffic_ms_{0};

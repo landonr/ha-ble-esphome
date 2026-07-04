@@ -23,6 +23,9 @@ static constexpr auto ESPHOME_VERSION_REF = StringRef::from_lit(ESPHOME_VERSION)
 using namespace api;  // vendored proto layer (see PROTO_VENDORED.md)
 
 APIBLEConnection::APIBLEConnection(APIBLEServer *server) : server_(server) {
+#ifdef USE_API_BLE_NOISE
+  this->noise_ = std::make_unique<NoiseSession>(server->get_noise_psk());
+#endif
   this->last_traffic_ms_ = millis();
   ESP_LOGD(TAG, "Session opened (CCCD subscription)");
 }
@@ -63,13 +66,74 @@ void APIBLEConnection::fatal_error_(const char *reason) {
   this->should_close_ = true;
 }
 
+#ifdef USE_API_BLE_NOISE
+
+void APIBLEConnection::parse_frames_() {
+  // Noise framing: 0x01 indicator + u16 BE body length + body. Handshake
+  // frames go to the NoiseSession; data frames are decrypted in place and
+  // dispatched like plaintext payloads.
+  while (!this->should_close_ && this->pipe_.rx_size() > 0) {
+    const uint8_t *data = this->pipe_.rx_data();
+    const uint32_t avail = this->pipe_.rx_size();
+
+    if (data[0] != 0x01) {
+      // A PSK is configured, so plaintext clients are rejected explicitly
+      // (in-tree semantics: reject frame, then drop). Only the RX side is
+      // cleared -- the reject frame must still drain out of the TX ring.
+      this->noise_->send_reject(this->pipe_, "Bad indicator byte");
+      this->fatal_error_("bad frame indicator (Noise required)");
+      this->pipe_.rx_clear();
+      return;
+    }
+    if (avail < 3)
+      return;  // wait for the full frame header
+
+    const uint16_t body_len = (static_cast<uint16_t>(data[1]) << 8) | data[2];
+    const bool in_data_phase = this->noise_->in_data_phase();
+    const uint32_t limit = in_data_phase ? MAX_RX_FRAME_SIZE : NoiseSession::MAX_HANDSHAKE_SIZE;
+    if (body_len > limit) {
+      if (!in_data_phase) {
+        this->noise_->send_reject(this->pipe_, "Bad handshake packet len");
+      }
+      this->fatal_error_("frame too large");
+      this->pipe_.rx_clear();
+      return;
+    }
+    if (avail < 3u + body_len)
+      return;  // frame spans more GATT packets, wait
+
+    this->last_traffic_ms_ = millis();
+    uint8_t *body = this->pipe_.rx_data_mutable() + 3;
+    if (!in_data_phase) {
+      if (!this->noise_->on_handshake_frame(this->pipe_, body, body_len)) {
+        this->fatal_error_("Noise handshake failed");
+        // Keep the TX ring: the explicit reject frame must still drain out.
+        this->pipe_.rx_clear();
+        return;
+      }
+    } else {
+      uint16_t msg_type;
+      const uint8_t *payload;
+      uint16_t payload_len;
+      if (!this->noise_->decrypt(body, body_len, msg_type, payload, payload_len)) {
+        this->fatal_error_("Noise decrypt failed");
+        this->pipe_.reset();
+        return;
+      }
+      this->dispatch_message_(msg_type, payload, payload_len);
+    }
+    this->pipe_.rx_consume(3u + body_len);
+  }
+}
+
+#else  // plaintext
+
 void APIBLEConnection::parse_frames_() {
   while (!this->should_close_ && this->pipe_.rx_size() > 0) {
     const uint8_t *data = this->pipe_.rx_data();
     const uint32_t avail = this->pipe_.rx_size();
 
     if (data[0] != 0x00) {
-      // TODO(phase 3, USE_API_BLE_NOISE): 0x01 introduces a Noise frame.
       this->fatal_error_("bad frame indicator (expected plaintext 0x00)");
       this->pipe_.reset();
       return;
@@ -113,6 +177,8 @@ void APIBLEConnection::parse_frames_() {
     this->pipe_.rx_consume(offset + payload_size);
   }
 }
+
+#endif  // USE_API_BLE_NOISE
 
 void APIBLEConnection::dispatch_message_(uint32_t type, const uint8_t *data, uint32_t len) {
   ESP_LOGVV(TAG, "RX message type=%" PRIu32 " len=%" PRIu32, type, len);
@@ -637,6 +703,33 @@ void APIBLEConnection::on_media_player_command_request_(const uint8_t *data, uin
 }
 #endif
 
+#ifdef USE_API_BLE_NOISE
+
+bool APIBLEConnection::write_frame_(uint8_t message_type, uint16_t payload_size) {
+  // send_message encoded the payload at FRAME_HEADER_PADDING; grow the buffer
+  // by the MAC footer and encrypt in place (in-tree write_protobuf_packet).
+  if (!this->noise_->in_data_phase()) {
+    // Nothing legitimate is sent before the handshake completes (the Hello
+    // exchange itself rides encrypted); e.g. a keepalive ping firing during
+    // a stalled handshake lands here.
+    this->fatal_error_("TX before Noise handshake completed");
+    return false;
+  }
+  this->tx_buf_.resize(this->tx_buf_.size() + NoiseSession::MAC_SIZE);
+  const uint16_t frame_len = this->noise_->encrypt(this->tx_buf_.data(), payload_size, message_type);
+  if (frame_len == 0) {
+    this->fatal_error_("Noise encrypt failed");
+    return false;
+  }
+  if (!this->pipe_.write(this->tx_buf_.data(), frame_len)) {
+    this->fatal_error_("TX ring overflow");
+    return false;
+  }
+  return true;
+}
+
+#else  // plaintext
+
 bool APIBLEConnection::write_frame_(uint8_t message_type, uint16_t payload_size) {
   // Plaintext header, right-justified within the padding so header + payload
   // are contiguous (simplified version of the api component's
@@ -659,6 +752,8 @@ bool APIBLEConnection::write_frame_(uint8_t message_type, uint16_t payload_size)
   }
   return true;
 }
+
+#endif  // USE_API_BLE_NOISE
 
 }  // namespace esphome::api_ble
 

@@ -54,6 +54,7 @@ class APIBLEServer : public Component, public Controller {
   }
 #ifdef USE_API_BLE_NOISE
   void set_noise_psk(const std::array<uint8_t, 32> &psk) { this->noise_psk_ = psk; }
+  const std::array<uint8_t, 32> &get_noise_psk() const { return this->noise_psk_; }
 #endif
 
   /// Raw GATTS events, registered with esp32_ble via codegen (the ESPHome BLE
@@ -131,6 +132,11 @@ class APIBLEServer : public Component, public Controller {
   uint16_t conn_id_{INVALID_CONN_ID};
   uint16_t mtu_{DEFAULT_MTU};
   uint16_t cccd_handle_{0};
+  /// TX characteristic attribute handle, captured at ESP_GATTS_ADD_CHAR_EVT
+  /// (the wrapper does not expose it) for direct esp_ble_gatts_send_indicate.
+  uint16_t tx_char_handle_{0};
+  /// Bluedroid congestion state (ESP_GATTS_CONGEST_EVT); pauses the TX drain.
+  bool congested_{false};
   uint8_t remote_bda_[6]{};
 
   std::vector<HomeAssistantStateSubscription> state_subs_;

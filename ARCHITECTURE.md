@@ -75,15 +75,18 @@ One primary service, two characteristics (Nordic-UART-style, custom UUIDs):
 
 ### TX flow control
 
-The ESPHome wrapper has no notify congestion feedback (no `ESP_GATTS_CONF_EVT`
-handling) — `notify()` is fire-and-forget and errors when Bluedroid's queue is
-full. `api_ble` therefore owns a TX ring buffer:
+The ESPHome wrapper has no notify congestion feedback — `notify()` returns
+void and only logs when Bluedroid's queue is full. `api_ble` therefore owns a
+TX ring buffer and bypasses the wrapper on the send path:
 
 - `send bytes` = append to ring (fail/close connection if ring full — same
   semantics as the TCP helper's overflow buffer limit).
-- Each `loop()` drains the ring in MTU-sized chunks; if
-  `esp_ble_gatts_send_indicate` returns an error (congestion), stop and retry
-  next loop iteration.
+- Each `loop()` drains the ring in MTU-sized chunks via
+  `esp_ble_gatts_send_indicate` directly (the TX characteristic's attribute
+  handle is captured from our own `ESP_GATTS_ADD_CHAR_EVT` handler — the
+  wrapper keeps it protected). The drain pauses while the stack reports
+  congestion (`ESP_GATTS_CONGEST_EVT`) and stops-and-retries on send errors;
+  a generous per-loop chunk cap (16) only bounds main-loop time.
 - Ring sized to cover the initial burst (DeviceInfo + ListEntities + initial
   states — a few KB); configurable.
 
@@ -106,8 +109,8 @@ depends on `network`. `api_ble` does not touch it.
   characteristic's `on_write` (main-loop context, already serialized), TX ring
   drained into notifications as above, negotiated MTU tracking.
 - **`APIBLEConnection`**: lean reimplementation of the connection state machine
-  over a `BLEBytePipe`: frame parsing (plaintext first, Noise behind
-  `USE_API_BLE_NOISE`), Hello/DeviceInfo/Ping/Disconnect handling,
+  over a `BLEBytePipe`: frame parsing (plaintext, or Noise-only when a PSK is
+  configured — `USE_API_BLE_NOISE`), Hello/DeviceInfo/Ping/Disconnect handling,
   ListEntities + SubscribeStates with initial-state dump then push-on-change
   (reusing `ComponentIterator` from core), SubscribeHomeassistantServices, and
   command dispatch for the supported entity subset.
@@ -173,7 +176,10 @@ integration remains the entity layer; hable is transport only.
      `127.0.0.1:0` (ephemeral port).
   3. Pump bytes: TCP→RX-characteristic writes (chunked to `client.mtu_size −
      3`, write-without-response with periodic with-response writes for flow
-     control); TX-notifications→TCP.
+     control); TX-notifications→TCP. Backpressure BLE→TCP: past a write-buffer
+     high-water mark (`TCP_WRITE_HIGH_WATER`, 256 KiB) the stalled TCP client
+     is dropped — the esphome integration reconnects and the protocol
+     restarts from Hello.
   4. Create — or update the host/port of — a stock `esphome` config entry
      pointing at `127.0.0.1:<port>`. Noise PSK entry/storage is handled by the
      esphome integration's own flow, untouched.
@@ -182,9 +188,12 @@ integration remains the entity layer; hable is transport only.
 - **Reconnection**: the bridge holds the GATT connection persistently. If BLE
   drops: close the TCP client (the esphome integration's `ReconnectLogic`
   starts backing off), register a `bluetooth.async_register_callback` for the
-  address, reconnect when the device advertises again, then accept the next
-  TCP connect. RSSI dropouts thus degrade to the same UX as a WiFi node going
-  offline.
+  address, and run a fallback retry timer on a 1/2/5/10/30 s backoff
+  (`RECONNECT_BACKOFF`; the device resumes advertising immediately after a
+  drop and the cached `BLEDevice` is usually still resolvable, so the first
+  retry fires 1 s in rather than waiting for a relayed advertisement).
+  Whichever trigger fires first reconnects; then accept the next TCP connect.
+  RSSI dropouts thus degrade to the same UX as a WiFi node going offline.
 - **`allow_service_calls`**: enforced by the esphome integration per entry as
   today (device-initiated actions are dropped unless the user enables the
   option) — hable inherits the gate for free.
@@ -200,7 +209,12 @@ protocol surface and survives HA upgrades.
   `Noise_NNpsk0_25519_ChaChaPoly_SHA256` end-to-end: the device authenticates
   the client via the 32-byte PSK, traffic is AEAD-encrypted, and the BLE layer
   needs no trust. Same `encryption: key:` YAML; the esphome integration prompts
-  for the key exactly as for WiFi nodes.
+  for the key exactly as for WiFi nodes. Device side implemented in
+  `noise_session.{h,cpp}` — a lean transcription of the in-tree
+  `APINoiseFrameHelper` over the byte pipe (byte-identical wire format,
+  including server hello and explicit-reject frames). With a PSK configured
+  the connection is Noise-only: plaintext clients get a reject frame, then
+  the link drops (in-tree semantics).
 - **Plaintext allowed** for bring-up and parity with `api:` (note: BLE is
   trivially sniffable vs. a WPA2 LAN — docs will recommend enabling Noise).
 - **No BLE pairing/bonding**: keeps the link stateless, works through any
@@ -232,9 +246,11 @@ protocol surface and survives HA upgrades.
    states over 20-byte chunks (pre-MTU-exchange or MTU-23 centrals) would be
    slow; mitigation: hold TX until MTU exchange completes (BlueZ negotiates
    immediately), and keep MVP entity lists small.
-2. **Bluedroid notify congestion.** No CONF feedback; the retry-on-error drain
-   is coarse. If it proves lossy under load, switch TX to indications with an
-   in-flight window of 1 (slower but ACKed) behind a config flag.
+2. **Bluedroid notify congestion.** ~~No CONF feedback; the retry-on-error
+   drain is coarse.~~ Resolved: the drain calls `esp_ble_gatts_send_indicate`
+   directly and pauses on `ESP_GATTS_CONGEST_EVT` / send errors. If it still
+   proves lossy under load, switch TX to indications with an in-flight window
+   of 1 (slower but ACKed) behind a config flag.
 3. **ESPHome wrapper is BLE 4.2-featured** (`CONFIG_BT_BLE_42_FEATURES_SUPPORTED`;
    no DLE/2M-PHY knobs exposed). Effective throughput ~constrained; likely fine
    for state traffic, matters for logs/OTA (both out of scope for BLE MVP).
@@ -268,8 +284,8 @@ protocol surface and survives HA upgrades.
   HA until their first change. (Fixed.)
 - The device drops the whole BLE link on API `DisconnectRequest`; the bridge
   reconnects via the next relayed advertisement, observed latency up to ~2 min
-  through a proxy. TODO: also poll `async_ble_device_from_address` on a short
-  timer instead of relying solely on the advertisement callback.
+  through a proxy. Addressed: the fallback timer now retries on a
+  1/2/5/10/30 s backoff starting 1 s after the drop instead of a flat 30 s.
 - aioesphomeapi still emits legacy message type 3 (ConnectRequest) on login;
   it no longer exists in the 2026.x proto and is safely ignored (warning
   downgraded to debug-worthy noise).

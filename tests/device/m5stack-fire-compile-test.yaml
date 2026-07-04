@@ -17,6 +17,10 @@ esp32_ble:
 esp32_ble_server:
 
 api_ble:
+  # Noise encryption gate (USE_API_BLE_NOISE compile path on classic ESP32).
+  # Test-only key; not a secret.
+  encryption:
+    key: "aGFibGUtbm9pc2UtY29tcGlsZS10ZXN0LWtleS0zMiE="
 
 external_components:
   - source:

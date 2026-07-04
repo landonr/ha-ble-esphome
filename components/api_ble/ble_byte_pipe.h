@@ -5,14 +5,12 @@
 #ifdef USE_API_BLE
 #ifdef USE_ESP32
 
+#include <esp_gatts_api.h>
+
 #include <cstddef>
 #include <cstdint>
 #include <span>
 #include <vector>
-
-namespace esphome::esp32_ble_server {
-class BLECharacteristic;
-}  // namespace esphome::esp32_ble_server
 
 namespace esphome::api_ble {
 
@@ -25,27 +23,31 @@ namespace esphome::api_ble {
 /// TX: bytes to send are appended to a fixed-size ring buffer that loop()
 /// drains into notifications of at most (MTU - 3) bytes each.
 ///
-/// NOTE (flow control): BLECharacteristic::notify() returns void -- an
-/// esp_ble_gatts_send_indicate() congestion error is only logged inside
-/// esp32_ble_server, so this pipe cannot see it. As backpressure we drain at
-/// most MAX_NOTIFY_CHUNKS_PER_LOOP chunks per loop iteration instead of the
-/// architecture doc's stop-on-error scheme. Phase 2 option: capture the TX
-/// characteristic handle from our own GATTS ADD_CHAR event and call
-/// esp_ble_gatts_send_indicate() directly for real error feedback.
+/// Flow control: drain() bypasses the esp32_ble_server wrapper (whose
+/// notify() returns void, hiding congestion errors) and calls
+/// esp_ble_gatts_send_indicate() directly. It stops when the Bluedroid stack
+/// reports congestion (ESP_GATTS_CONGEST_EVT, tracked by APIBLEServer) or a
+/// send fails, and retries on the next loop() iteration.
 class BLEBytePipe {
  public:
   /// TX ring size: covers the initial burst (DeviceInfo + ListEntities +
   /// initial states). Configurable constant per architecture doc.
   static constexpr size_t TX_RING_SIZE = 4096;
-  /// Bounded number of notifications sent per loop() as coarse backpressure.
-  static constexpr size_t MAX_NOTIFY_CHUNKS_PER_LOOP = 4;
+  /// Upper bound on notifications per loop() -- bounds main-loop time only;
+  /// real backpressure comes from the congestion feedback.
+  static constexpr size_t MAX_NOTIFY_CHUNKS_PER_LOOP = 16;
 
   // --- RX side (fed by RX characteristic on_write) ---
   void feed_rx(std::span<const uint8_t> data);
   const uint8_t *rx_data() const { return this->rx_buffer_.data(); }
+  /// Mutable view for in-place Noise decryption.
+  uint8_t *rx_data_mutable() { return this->rx_buffer_.data(); }
   size_t rx_size() const { return this->rx_buffer_.size(); }
   /// Discard n consumed bytes from the front of the RX buffer.
   void rx_consume(size_t n);
+  /// Discard all buffered RX bytes, keeping pending TX (e.g. so a queued
+  /// Noise reject frame still drains out before teardown).
+  void rx_clear();
 
   // --- TX side ---
   /// Append bytes to the TX ring. Returns false (and appends nothing) when
@@ -56,9 +58,11 @@ class BLEBytePipe {
   size_t tx_free() const { return TX_RING_SIZE - this->tx_size_; }
   bool tx_empty() const { return this->tx_size_ == 0; }
 
-  /// Drain pending TX bytes into notifications on tx_char, chunked to
-  /// min(mtu - 3, remaining) bytes. Called from the owning component's loop().
-  void drain(esp32_ble_server::BLECharacteristic *tx_char, uint16_t mtu);
+  /// Drain pending TX bytes into notifications of min(mtu - 3, remaining)
+  /// bytes each via esp_ble_gatts_send_indicate. Called from the owning
+  /// component's loop(). `congested` is the stack's ESP_GATTS_CONGEST_EVT
+  /// state; when set, nothing is sent this iteration.
+  void drain(esp_gatt_if_t gatts_if, uint16_t conn_id, uint16_t attr_handle, uint16_t mtu, bool congested);
 
   /// Discard all buffered bytes (connection teardown).
   void reset();

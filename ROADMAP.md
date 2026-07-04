@@ -7,21 +7,26 @@ design and field findings.
 
 ## Phase 3 — Robustness (make it survive daily use)
 
-1. **Noise encryption over BLE** (device side). The byte pipe already carries
-   Noise unchanged and `USE_API_BLE_NOISE` gating + PSK plumbing exist; the
-   `0x01` frame parsing/handshake needs implementing in
-   `api_ble_connection.cpp`. Test: `encryption: key:` in demo YAML, stock
-   esphome integration prompts for key.
-2. **Device TX flow control.** Replace the blind 4-chunks-per-loop drain with
-   direct `esp_ble_gatts_send_indicate` + `ESP_GATTS_CONF_EVT` congestion
-   feedback (the esp32_ble_server wrapper's `notify()` returns void — handle
-   captured at `ESP_GATTS_ADD_CHAR_EVT`).
-3. **Bridge TCP backpressure.** Notification callback writes without drain;
-   add a write-buffer high-water mark → drop the TCP client past it.
-4. **Reconnect latency.** After a session ends, reconnection currently waits
-   for a relayed advertisement or the 30 s fallback timer. Options: faster
-   advertising interval on the device post-disconnect, or connect-on-demand
-   when the esphome integration dials TCP.
+Items 1–4 implemented 2026-07-03 (compile-gated; live validation of Noise on
+the Fire rig still pending — flash with `encryption: key:` and let the stock
+esphome integration prompt for the key).
+
+1. ~~**Noise encryption over BLE**~~ — done. `NoiseSession`
+   (`components/api_ble/noise_session.{h,cpp}`) transcribes the in-tree
+   `APINoiseFrameHelper` handshake/crypto over the byte pipe; with a PSK
+   configured the connection requires `0x01` frames and explicitly rejects
+   plaintext. Compile-gated on both chip families (`feature-test.yaml`,
+   `m5stack-fire-compile-test.yaml`).
+2. ~~**Device TX flow control.**~~ — done. Drain now calls
+   `esp_ble_gatts_send_indicate` directly (TX char handle captured at
+   `ESP_GATTS_ADD_CHAR_EVT`), pauses on `ESP_GATTS_CONGEST_EVT`, and retries
+   on send errors instead of the blind 4-chunks-per-loop cap.
+3. ~~**Bridge TCP backpressure.**~~ — done. Write-buffer high-water mark
+   (`TCP_WRITE_HIGH_WATER`, 256 KiB) → stalled esphome client is dropped and
+   reconnects.
+4. ~~**Reconnect latency.**~~ — done. Flat 30 s fallback timer replaced with
+   a 1/2/5/10/30 s backoff (`RECONNECT_BACKOFF`) starting 1 s after the BLE
+   drop; advertisement callback remains the fast path.
 5. **Verify connection-parameter requests** (`connection:` YAML block) are
    actually accepted by centrals/proxies; measure battery impact on a
    battery-powered target.

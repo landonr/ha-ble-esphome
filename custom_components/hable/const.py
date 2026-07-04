@@ -24,3 +24,13 @@ ATT_HEADER_SIZE = 3  # ATT write/notify opcode + handle overhead
 MIN_CHUNK_SIZE = 20  # DEFAULT_MTU - ATT_HEADER_SIZE
 # Every Nth GATT write uses response=True as coarse flow control.
 FLOW_CONTROL_WRITE_INTERVAL = 16
+
+# BLE->TCP backpressure: if the TCP client stalls and the transport's write
+# buffer exceeds this, the client is dropped (the esphome integration
+# reconnects and the protocol restarts from Hello).
+TCP_WRITE_HIGH_WATER = 256 * 1024
+
+# Reconnect backoff schedule (seconds) after a BLE drop; the last entry
+# repeats. The advertisement callback remains the fast path -- this timer is
+# the fallback for proxies whose advertisement relay lags (observed ~2 min).
+RECONNECT_BACKOFF = (1.0, 2.0, 5.0, 10.0, 30.0)

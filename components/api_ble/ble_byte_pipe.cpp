@@ -3,9 +3,9 @@
 #ifdef USE_API_BLE
 #ifdef USE_ESP32
 
-#include "esphome/components/esp32_ble_server/ble_characteristic.h"
 #include "esphome/core/log.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace esphome::api_ble {
@@ -26,6 +26,8 @@ void BLEBytePipe::rx_consume(size_t n) {
   this->rx_buffer_.erase(this->rx_buffer_.begin(), this->rx_buffer_.begin() + static_cast<ptrdiff_t>(n));
 }
 
+void BLEBytePipe::rx_clear() { this->rx_buffer_.clear(); }
+
 bool BLEBytePipe::write(const uint8_t *data, size_t len) {
   if (len > this->tx_free()) {
     ESP_LOGW(TAG, "TX ring full (%u pending, %u requested)", static_cast<unsigned>(this->tx_size_),
@@ -42,24 +44,31 @@ bool BLEBytePipe::write(const uint8_t *data, size_t len) {
   return true;
 }
 
-void BLEBytePipe::drain(esp32_ble_server::BLECharacteristic *tx_char, uint16_t mtu) {
-  if (tx_char == nullptr || this->tx_size_ == 0)
+void BLEBytePipe::drain(esp_gatt_if_t gatts_if, uint16_t conn_id, uint16_t attr_handle, uint16_t mtu,
+                        bool congested) {
+  if (attr_handle == 0 || this->tx_size_ == 0 || congested)
     return;
   // Notification payload limit is ATT_MTU - 3 (1 byte opcode + 2 bytes handle).
-  const size_t max_chunk = (mtu > 3) ? static_cast<size_t>(mtu - 3) : 20;
+  // Chunks are staged through a stack buffer: the ring may wrap, and
+  // esp_ble_gatts_send_indicate copies the data into its own queue anyway.
+  uint8_t chunk_buf[514];  // max ATT payload at MTU 517
+  const size_t max_chunk = std::min<size_t>((mtu > 3) ? static_cast<size_t>(mtu - 3) : 20, sizeof(chunk_buf));
 
-  // notify() gives no congestion feedback (see header note), so cap the
-  // number of chunks per loop iteration as coarse backpressure.
   for (size_t i = 0; i < MAX_NOTIFY_CHUNKS_PER_LOOP && this->tx_size_ > 0; i++) {
     size_t chunk = std::min(this->tx_size_, max_chunk);
-    std::vector<uint8_t> payload(chunk);
     size_t first = std::min(chunk, TX_RING_SIZE - this->tx_head_);
-    std::memcpy(payload.data(), this->tx_ring_ + this->tx_head_, first);
+    std::memcpy(chunk_buf, this->tx_ring_ + this->tx_head_, first);
     if (first < chunk) {
-      std::memcpy(payload.data() + first, this->tx_ring_, chunk - first);
+      std::memcpy(chunk_buf + first, this->tx_ring_, chunk - first);
     }
-    tx_char->set_value(std::move(payload));
-    tx_char->notify();
+    esp_err_t err = esp_ble_gatts_send_indicate(gatts_if, conn_id, attr_handle, chunk, chunk_buf,
+                                                /*need_confirm=*/false);
+    if (err != ESP_OK) {
+      // Bluedroid TX queue full (or link mid-teardown); keep the bytes and
+      // retry next loop iteration.
+      ESP_LOGVV(TAG, "send_indicate error %d; %u bytes deferred", err, static_cast<unsigned>(this->tx_size_));
+      return;
+    }
     this->tx_head_ = (this->tx_head_ + chunk) % TX_RING_SIZE;
     this->tx_size_ -= chunk;
   }
