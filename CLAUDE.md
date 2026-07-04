@@ -48,6 +48,19 @@ cd tools && .venv/bin/python mac_bridge.py scan
 Do not run `mac_bridge` while HA's bridge is connected — the device accepts a
 single central.
 
+Driving the device over USB (works while HA is connected; exclusive with
+`esphome logs` — one process owns the serial port):
+
+```bash
+tools/.venv/bin/python tools/serial_console.py --cmd "lamp toggle"          # send + watch 5 s
+tools/.venv/bin/python tools/serial_console.py --watch 30 --grep "params"   # filtered log tail
+```
+
+Layout rule: `components/` holds **only** the upstreamable `api_ble`.
+Dev/test-only device components live in `tools/components/` (e.g.
+`serial_console`), pulled in by demo/test YAMLs as a second
+`external_components` source — never by shippable examples.
+
 ## Deploying to the live HA instance
 
 - Copy `custom_components/hable/` to the HA `config` share over Samba

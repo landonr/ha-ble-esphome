@@ -231,6 +231,22 @@ protocol surface and survives HA upgrades.
 
 ## 7. Test / validation plan
 
+### Repo layout: shippable vs. dev-only
+
+The split is deliberate, to keep the upstreaming surface obvious:
+
+- `components/` — **only** `api_ble`, the upstreamable device component.
+  Nothing debugging- or test-flavored goes here.
+- `custom_components/hable/` — the shippable HA integration.
+- `tools/` — host-side dev tooling (`mac_bridge.py`, `serial_console.py`)
+  and `tools/components/` for device-side dev-only ESPHome components
+  (`serial_console`: drives the device over the logger's USB serial —
+  the ESP-IDF logger installs a UART driver whose RX side it never reads,
+  so command lines can be injected on the same cable that carries logs).
+- `tests/device/` — device YAMLs; demo/test configs may pull in
+  `tools/components` as a second `external_components` source, shippable
+  examples must not.
+
 - Device target: **Seeed XIAO ESP32-C6 on USB** (`seeed_xiao_esp32c6`,
   ESP-IDF). `tests/device/xiao-c6.yaml` with template binary_sensor / sensor /
   text_sensor / switch / light and an `on_...: homeassistant.action` trigger.

@@ -32,6 +32,41 @@ external_components:
   - source:
       type: local
       path: ../../components
+  # Dev/test-only components live under tools/, never in components/ (which
+  # holds only the upstreamable api_ble).
+  - source:
+      type: local
+      path: ../../tools/components
+
+# Dev tool: drive the demo over USB (tools/serial_console.py) so BLE-API
+# commands can be triggered without pressing buttons.
+serial_console:
+  on_command:
+    then:
+      - lambda: |-
+          if (x == "lamp on") {
+            id(office_lamp).turn_on();
+          } else if (x == "lamp off") {
+            id(office_lamp).turn_off();
+          } else if (x == "lamp toggle") {
+            id(office_lamp).toggle();
+          } else if (x == "play") {
+            id(spotify_playpause).execute();
+          } else if (x.rfind("vol ", 0) == 0) {
+            auto call = id(spotify_volume).make_call();
+            call.set_value(atof(x.c_str() + 4));
+            call.perform();
+          } else {
+            ESP_LOGW("serial_console", "Unknown command: '%s' (try: lamp on|off|toggle, play, vol N)", x.c_str());
+          }
+
+script:
+  - id: spotify_playpause
+    then:
+      - homeassistant.action:
+          action: media_player.media_play_pause
+          data:
+            entity_id: media_player.spotify_landorghini
 
 spi:
   clk_pin: GPIO18
