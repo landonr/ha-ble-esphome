@@ -313,6 +313,42 @@ void APIBLEServer::on_light_update(light::LightState *obj) {
     this->connection_->send_light_state(obj);
 }
 #endif
+#ifdef USE_COVER
+void APIBLEServer::on_cover_update(cover::Cover *obj) {
+  if (this->connection_ != nullptr && this->connection_->states_subscribed())
+    this->connection_->send_cover_state(obj);
+}
+#endif
+#ifdef USE_FAN
+void APIBLEServer::on_fan_update(fan::Fan *obj) {
+  if (this->connection_ != nullptr && this->connection_->states_subscribed())
+    this->connection_->send_fan_state(obj);
+}
+#endif
+#ifdef USE_CLIMATE
+void APIBLEServer::on_climate_update(climate::Climate *obj) {
+  if (this->connection_ != nullptr && this->connection_->states_subscribed())
+    this->connection_->send_climate_state(obj);
+}
+#endif
+#ifdef USE_NUMBER
+void APIBLEServer::on_number_update(number::Number *obj) {
+  if (this->connection_ != nullptr && this->connection_->states_subscribed())
+    this->connection_->send_number_state(obj);
+}
+#endif
+#ifdef USE_SELECT
+void APIBLEServer::on_select_update(select::Select *obj) {
+  if (this->connection_ != nullptr && this->connection_->states_subscribed())
+    this->connection_->send_select_state(obj);
+}
+#endif
+#ifdef USE_LOCK
+void APIBLEServer::on_lock_update(lock::Lock *obj) {
+  if (this->connection_ != nullptr && this->connection_->states_subscribed())
+    this->connection_->send_lock_state(obj);
+}
+#endif
 #ifdef USE_MEDIA_PLAYER
 void APIBLEServer::on_media_player_update(media_player::MediaPlayer *obj) {
   if (this->connection_ != nullptr && this->connection_->states_subscribed())

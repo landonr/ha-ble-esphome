@@ -34,6 +34,27 @@
 #ifdef USE_LIGHT
 #include "esphome/components/light/light_state.h"
 #endif
+#ifdef USE_COVER
+#include "esphome/components/cover/cover.h"
+#endif
+#ifdef USE_FAN
+#include "esphome/components/fan/fan.h"
+#endif
+#ifdef USE_CLIMATE
+#include "esphome/components/climate/climate.h"
+#endif
+#ifdef USE_NUMBER
+#include "esphome/components/number/number.h"
+#endif
+#ifdef USE_SELECT
+#include "esphome/components/select/select.h"
+#endif
+#ifdef USE_BUTTON
+#include "esphome/components/button/button.h"
+#endif
+#ifdef USE_LOCK
+#include "esphome/components/lock/lock.h"
+#endif
 #ifdef USE_MEDIA_PLAYER
 #include "esphome/components/media_player/media_player.h"
 #endif
@@ -103,6 +124,24 @@ class APIBLEConnection {
 #endif
 #ifdef USE_LIGHT
   bool send_light_state(light::LightState *entity);
+#endif
+#ifdef USE_COVER
+  bool send_cover_state(cover::Cover *entity);
+#endif
+#ifdef USE_FAN
+  bool send_fan_state(fan::Fan *entity);
+#endif
+#ifdef USE_CLIMATE
+  bool send_climate_state(climate::Climate *entity);
+#endif
+#ifdef USE_NUMBER
+  bool send_number_state(number::Number *entity);
+#endif
+#ifdef USE_SELECT
+  bool send_select_state(select::Select *entity);
+#endif
+#ifdef USE_LOCK
+  bool send_lock_state(lock::Lock *entity);
 #endif
 #ifdef USE_MEDIA_PLAYER
   bool send_media_player_state(media_player::MediaPlayer *entity);
@@ -182,6 +221,27 @@ class APIBLEConnection {
 #endif
 #ifdef USE_LIGHT
   void on_light_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_COVER
+  void on_cover_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_FAN
+  void on_fan_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_CLIMATE
+  void on_climate_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_NUMBER
+  void on_number_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_SELECT
+  void on_select_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_BUTTON
+  void on_button_command_request_(const uint8_t *data, uint32_t len);
+#endif
+#ifdef USE_LOCK
+  void on_lock_command_request_(const uint8_t *data, uint32_t len);
 #endif
 #ifdef USE_MEDIA_PLAYER
   void on_media_player_command_request_(const uint8_t *data, uint32_t len);

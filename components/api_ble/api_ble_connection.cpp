@@ -207,6 +207,16 @@ void APIBLEConnection::dispatch_message_(uint32_t type, const uint8_t *data, uin
     case 20:  // SubscribeStatesRequest (empty message)
       this->on_subscribe_states_request_();
       break;
+#ifdef USE_COVER
+    case 30:  // CoverCommandRequest
+      this->on_cover_command_request_(data, len);
+      break;
+#endif
+#ifdef USE_FAN
+    case 31:  // FanCommandRequest
+      this->on_fan_command_request_(data, len);
+      break;
+#endif
 #ifdef USE_LIGHT
     case 32:  // LightCommandRequest
       this->on_light_command_request_(data, len);
@@ -226,6 +236,31 @@ void APIBLEConnection::dispatch_message_(uint32_t type, const uint8_t *data, uin
     case HomeAssistantStateResponse::MESSAGE_TYPE:  // 40
       this->on_home_assistant_state_response_(data, len);
       break;
+#ifdef USE_CLIMATE
+    case 48:  // ClimateCommandRequest
+      this->on_climate_command_request_(data, len);
+      break;
+#endif
+#ifdef USE_NUMBER
+    case 51:  // NumberCommandRequest
+      this->on_number_command_request_(data, len);
+      break;
+#endif
+#ifdef USE_SELECT
+    case 54:  // SelectCommandRequest
+      this->on_select_command_request_(data, len);
+      break;
+#endif
+#ifdef USE_LOCK
+    case 60:  // LockCommandRequest
+      this->on_lock_command_request_(data, len);
+      break;
+#endif
+#ifdef USE_BUTTON
+    case 62:  // ButtonCommandRequest
+      this->on_button_command_request_(data, len);
+      break;
+#endif
 #ifdef USE_MEDIA_PLAYER
     case 65:  // MediaPlayerCommandRequest
       this->on_media_player_command_request_(data, len);
@@ -392,6 +427,117 @@ void APIBLEConnection::on_list_entities_request_() {
       return;
   }
 #endif
+#ifdef USE_COVER
+  for (auto *entity : App.get_covers()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesCoverResponse msg;
+    auto traits = entity->get_traits();
+    msg.assumed_state = traits.get_is_assumed_state();
+    msg.supports_position = traits.get_supports_position();
+    msg.supports_tilt = traits.get_supports_tilt();
+    msg.supports_stop = traits.get_supports_stop();
+    char dc_buf[MAX_DEVICE_CLASS_LENGTH];
+    msg.device_class = StringRef(entity->get_device_class_to(dc_buf));
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
+#ifdef USE_FAN
+  for (auto *entity : App.get_fans()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesFanResponse msg;
+    auto traits = entity->get_traits();
+    msg.supports_oscillation = traits.supports_oscillation();
+    msg.supports_speed = traits.supports_speed();
+    msg.supports_direction = traits.supports_direction();
+    msg.supported_speed_count = traits.supported_speed_count();
+    msg.supported_preset_modes = &traits.supported_preset_modes();
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
+#ifdef USE_CLIMATE
+  for (auto *entity : App.get_climates()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesClimateResponse msg;
+    auto traits = entity->get_traits();
+    // Flags kept for backward compatibility with older HA clients; the modern
+    // client reads feature_flags below.
+    msg.supports_current_temperature = traits.has_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
+    msg.supports_current_humidity = traits.has_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY);
+    msg.supports_two_point_target_temperature = traits.has_feature_flags(
+        climate::CLIMATE_SUPPORTS_TWO_POINT_TARGET_TEMPERATURE | climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE);
+    msg.supports_target_humidity = traits.has_feature_flags(climate::CLIMATE_SUPPORTS_TARGET_HUMIDITY);
+    msg.supports_action = traits.has_feature_flags(climate::CLIMATE_SUPPORTS_ACTION);
+    msg.feature_flags = traits.get_feature_flags();
+    msg.supported_modes = &traits.get_supported_modes();
+    msg.visual_min_temperature = traits.get_visual_min_temperature();
+    msg.visual_max_temperature = traits.get_visual_max_temperature();
+    msg.visual_target_temperature_step = traits.get_visual_target_temperature_step();
+    msg.visual_current_temperature_step = traits.get_visual_current_temperature_step();
+    msg.visual_min_humidity = traits.get_visual_min_humidity();
+    msg.visual_max_humidity = traits.get_visual_max_humidity();
+    msg.supported_fan_modes = &traits.get_supported_fan_modes();
+    msg.supported_custom_fan_modes = &traits.get_supported_custom_fan_modes();
+    msg.supported_presets = &traits.get_supported_presets();
+    msg.supported_custom_presets = &traits.get_supported_custom_presets();
+    msg.supported_swing_modes = &traits.get_supported_swing_modes();
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
+#ifdef USE_NUMBER
+  for (auto *entity : App.get_numbers()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesNumberResponse msg;
+    msg.unit_of_measurement = entity->get_unit_of_measurement_ref();
+    msg.mode = static_cast<enums::NumberMode>(entity->traits.get_mode());
+    msg.min_value = entity->traits.get_min_value();
+    msg.max_value = entity->traits.get_max_value();
+    msg.step = entity->traits.get_step();
+    char dc_buf[MAX_DEVICE_CLASS_LENGTH];
+    msg.device_class = StringRef(entity->get_device_class_to(dc_buf));
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
+#ifdef USE_SELECT
+  for (auto *entity : App.get_selects()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesSelectResponse msg;
+    msg.options = &entity->traits.get_options();
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
+#ifdef USE_BUTTON
+  for (auto *entity : App.get_buttons()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesButtonResponse msg;
+    char dc_buf[MAX_DEVICE_CLASS_LENGTH];
+    msg.device_class = StringRef(entity->get_device_class_to(dc_buf));
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
+#ifdef USE_LOCK
+  for (auto *entity : App.get_locks()) {
+    if (entity->is_internal())
+      continue;
+    ListEntitiesLockResponse msg;
+    msg.assumed_state = entity->traits.get_assumed_state();
+    msg.supports_open = entity->traits.get_supports_open();
+    msg.requires_code = entity->traits.get_requires_code();
+    if (!this->send_entity_info_(entity, msg))
+      return;
+  }
+#endif
 #ifdef USE_MEDIA_PLAYER
   for (auto *entity : App.get_media_players()) {
     if (entity->is_internal())
@@ -465,6 +611,54 @@ void APIBLEConnection::on_subscribe_states_request_() {
       return;
   }
 #endif
+#ifdef USE_COVER
+  for (auto *entity : App.get_covers()) {
+    if (entity->is_internal())
+      continue;
+    if (!this->send_cover_state(entity))
+      return;
+  }
+#endif
+#ifdef USE_FAN
+  for (auto *entity : App.get_fans()) {
+    if (entity->is_internal())
+      continue;
+    if (!this->send_fan_state(entity))
+      return;
+  }
+#endif
+#ifdef USE_CLIMATE
+  for (auto *entity : App.get_climates()) {
+    if (entity->is_internal())
+      continue;
+    if (!this->send_climate_state(entity))
+      return;
+  }
+#endif
+#ifdef USE_NUMBER
+  for (auto *entity : App.get_numbers()) {
+    if (entity->is_internal())
+      continue;
+    if (!this->send_number_state(entity))
+      return;
+  }
+#endif
+#ifdef USE_SELECT
+  for (auto *entity : App.get_selects()) {
+    if (entity->is_internal())
+      continue;
+    if (!this->send_select_state(entity))
+      return;
+  }
+#endif
+#ifdef USE_LOCK
+  for (auto *entity : App.get_locks()) {
+    if (entity->is_internal())
+      continue;
+    if (!this->send_lock_state(entity))
+      return;
+  }
+#endif
 #ifdef USE_MEDIA_PLAYER
   for (auto *entity : App.get_media_players()) {
     if (entity->is_internal())
@@ -529,6 +723,94 @@ bool APIBLEConnection::send_light_state(light::LightState *entity) {
   if (entity->supports_effects()) {
     resp.effect = entity->get_effect_name();
   }
+  return this->send_entity_state_(entity, resp);
+}
+#endif
+
+#ifdef USE_COVER
+bool APIBLEConnection::send_cover_state(cover::Cover *entity) {
+  CoverStateResponse resp;
+  auto traits = entity->get_traits();
+  resp.position = entity->position;
+  if (traits.get_supports_tilt())
+    resp.tilt = entity->tilt;
+  resp.current_operation = static_cast<enums::CoverOperation>(entity->current_operation);
+  return this->send_entity_state_(entity, resp);
+}
+#endif
+
+#ifdef USE_FAN
+bool APIBLEConnection::send_fan_state(fan::Fan *entity) {
+  FanStateResponse resp;
+  auto traits = entity->get_traits();
+  resp.state = entity->state;
+  if (traits.supports_oscillation())
+    resp.oscillating = entity->oscillating;
+  if (traits.supports_speed())
+    resp.speed_level = entity->speed;
+  if (traits.supports_direction())
+    resp.direction = static_cast<enums::FanDirection>(entity->direction);
+  if (traits.supports_preset_modes() && entity->has_preset_mode())
+    resp.preset_mode = entity->get_preset_mode();
+  return this->send_entity_state_(entity, resp);
+}
+#endif
+
+#ifdef USE_CLIMATE
+bool APIBLEConnection::send_climate_state(climate::Climate *entity) {
+  ClimateStateResponse resp;
+  auto traits = entity->get_traits();
+  resp.mode = static_cast<enums::ClimateMode>(entity->mode);
+  resp.action = static_cast<enums::ClimateAction>(entity->action);
+  if (traits.has_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE))
+    resp.current_temperature = entity->current_temperature;
+  if (traits.has_feature_flags(climate::CLIMATE_SUPPORTS_TWO_POINT_TARGET_TEMPERATURE |
+                               climate::CLIMATE_REQUIRES_TWO_POINT_TARGET_TEMPERATURE)) {
+    resp.target_temperature_low = entity->target_temperature_low;
+    resp.target_temperature_high = entity->target_temperature_high;
+  } else {
+    resp.target_temperature = entity->target_temperature;
+  }
+  if (traits.get_supports_fan_modes() && entity->fan_mode.has_value())
+    resp.fan_mode = static_cast<enums::ClimateFanMode>(entity->fan_mode.value());
+  if (!traits.get_supported_custom_fan_modes().empty() && entity->has_custom_fan_mode())
+    resp.custom_fan_mode = entity->get_custom_fan_mode();
+  if (traits.get_supports_presets() && entity->preset.has_value())
+    resp.preset = static_cast<enums::ClimatePreset>(entity->preset.value());
+  if (!traits.get_supported_custom_presets().empty() && entity->has_custom_preset())
+    resp.custom_preset = entity->get_custom_preset();
+  if (traits.get_supports_swing_modes())
+    resp.swing_mode = static_cast<enums::ClimateSwingMode>(entity->swing_mode);
+  if (traits.has_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY))
+    resp.current_humidity = entity->current_humidity;
+  if (traits.has_feature_flags(climate::CLIMATE_SUPPORTS_TARGET_HUMIDITY))
+    resp.target_humidity = entity->target_humidity;
+  return this->send_entity_state_(entity, resp);
+}
+#endif
+
+#ifdef USE_NUMBER
+bool APIBLEConnection::send_number_state(number::Number *entity) {
+  NumberStateResponse resp;
+  resp.state = entity->state;
+  resp.missing_state = !entity->has_state();
+  return this->send_entity_state_(entity, resp);
+}
+#endif
+
+#ifdef USE_SELECT
+bool APIBLEConnection::send_select_state(select::Select *entity) {
+  SelectStateResponse resp;
+  resp.state = entity->current_option();
+  resp.missing_state = !entity->has_state();
+  return this->send_entity_state_(entity, resp);
+}
+#endif
+
+#ifdef USE_LOCK
+bool APIBLEConnection::send_lock_state(lock::Lock *entity) {
+  LockStateResponse resp;
+  resp.state = static_cast<enums::LockState>(entity->state);
   return this->send_entity_state_(entity, resp);
 }
 #endif
@@ -674,6 +956,178 @@ void APIBLEConnection::on_light_command_request_(const uint8_t *data, uint32_t l
   if (msg.has_effect)
     call.set_effect(msg.effect.c_str(), msg.effect.size());
   call.perform();
+}
+#endif
+
+#ifdef USE_COVER
+void APIBLEConnection::on_cover_command_request_(const uint8_t *data, uint32_t len) {
+  CoverCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_cover_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_cover_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "CoverCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  auto call = entity->make_call();
+  if (msg.has_position)
+    call.set_position(msg.position);
+  if (msg.has_tilt)
+    call.set_tilt(msg.tilt);
+  if (msg.stop)
+    call.set_command_stop();
+  call.perform();
+}
+#endif
+
+#ifdef USE_FAN
+void APIBLEConnection::on_fan_command_request_(const uint8_t *data, uint32_t len) {
+  FanCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_fan_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_fan_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "FanCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  auto call = entity->make_call();
+  if (msg.has_state)
+    call.set_state(msg.state);
+  if (msg.has_oscillating)
+    call.set_oscillating(msg.oscillating);
+  if (msg.has_speed_level)
+    call.set_speed(msg.speed_level);
+  if (msg.has_direction)
+    call.set_direction(static_cast<fan::FanDirection>(msg.direction));
+  if (msg.has_preset_mode)
+    call.set_preset_mode(msg.preset_mode.c_str(), msg.preset_mode.size());
+  call.perform();
+}
+#endif
+
+#ifdef USE_CLIMATE
+void APIBLEConnection::on_climate_command_request_(const uint8_t *data, uint32_t len) {
+  ClimateCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_climate_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_climate_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "ClimateCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  auto call = entity->make_call();
+  if (msg.has_mode)
+    call.set_mode(static_cast<climate::ClimateMode>(msg.mode));
+  if (msg.has_target_temperature)
+    call.set_target_temperature(msg.target_temperature);
+  if (msg.has_target_temperature_low)
+    call.set_target_temperature_low(msg.target_temperature_low);
+  if (msg.has_target_temperature_high)
+    call.set_target_temperature_high(msg.target_temperature_high);
+  if (msg.has_target_humidity)
+    call.set_target_humidity(msg.target_humidity);
+  if (msg.has_fan_mode)
+    call.set_fan_mode(static_cast<climate::ClimateFanMode>(msg.fan_mode));
+  if (msg.has_custom_fan_mode)
+    call.set_fan_mode(msg.custom_fan_mode.c_str(), msg.custom_fan_mode.size());
+  if (msg.has_preset)
+    call.set_preset(static_cast<climate::ClimatePreset>(msg.preset));
+  if (msg.has_custom_preset)
+    call.set_preset(msg.custom_preset.c_str(), msg.custom_preset.size());
+  if (msg.has_swing_mode)
+    call.set_swing_mode(static_cast<climate::ClimateSwingMode>(msg.swing_mode));
+  call.perform();
+}
+#endif
+
+#ifdef USE_NUMBER
+void APIBLEConnection::on_number_command_request_(const uint8_t *data, uint32_t len) {
+  NumberCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_number_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_number_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "NumberCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  auto call = entity->make_call();
+  call.set_value(msg.state);
+  call.perform();
+}
+#endif
+
+#ifdef USE_SELECT
+void APIBLEConnection::on_select_command_request_(const uint8_t *data, uint32_t len) {
+  SelectCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_select_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_select_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "SelectCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  auto call = entity->make_call();
+  call.set_option(msg.state.c_str(), msg.state.size());
+  call.perform();
+}
+#endif
+
+#ifdef USE_BUTTON
+void APIBLEConnection::on_button_command_request_(const uint8_t *data, uint32_t len) {
+  ButtonCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_button_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_button_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "ButtonCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  entity->press();
+}
+#endif
+
+#ifdef USE_LOCK
+void APIBLEConnection::on_lock_command_request_(const uint8_t *data, uint32_t len) {
+  LockCommandRequest msg;
+  msg.decode(data, len);
+#ifdef USE_DEVICES
+  auto *entity = App.get_lock_by_key(msg.key, msg.device_id);
+#else
+  auto *entity = App.get_lock_by_key(msg.key);
+#endif
+  if (entity == nullptr) {
+    ESP_LOGW(TAG, "LockCommandRequest: unknown key %" PRIu32, msg.key);
+    return;
+  }
+  switch (msg.command) {
+    case enums::LOCK_UNLOCK:
+      entity->unlock();
+      break;
+    case enums::LOCK_LOCK:
+      entity->lock();
+      break;
+    case enums::LOCK_OPEN:
+      entity->open();
+      break;
+  }
 }
 #endif
 

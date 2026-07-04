@@ -37,10 +37,20 @@ esphome integration prompt for the key).
 
 ## Phase 4 — Completeness
 
-6. **More entity types**: cover, climate, fan, number, select, button, lock —
-   currently binary_sensor / sensor / text_sensor / switch / light
-   (+ media_player untested). Each is a small Info/State/Command triple in
-   `api_ble_connection.cpp` following the existing pattern.
+6. ~~**More entity types**: cover, climate, fan, number, select, button,
+   lock~~ — done 2026-07-04. Each is the standard Info/State/Command triple in
+   `api_ble_connection.cpp` (button is command-only: ListEntities + press, no
+   state, no Controller hook), with `on_*_update` Controller hooks in
+   `api_ble_server.cpp`, mirroring the in-tree `api_connection.cpp` encoders.
+   Compile-gated on both families: all seven added to `feature-test.yaml`
+   (ESP32-C6 + Noise) and `m5stack-fire-compile-test.yaml` (classic ESP32).
+   **Live-validated on the Fire rig 2026-07-04** through production HA over the
+   BLE API: all seven appear (ListEntities), report initial state, and
+   round-trip commands with state pushed back — cover (position), fan (speed),
+   climate (two-point target temp), number (value), select (option), lock
+   (lock/unlock), button (press). Demo entities live in
+   `m5stack-fire-demo.yaml`. Base subset was
+   binary_sensor / sensor / text_sensor / switch / light.
 7. **media_player**: compile-gate is in place but never built or exercised —
    add to a test config with a speaker platform.
 8. **`homeassistant.action` response capture** (`capture_response`,

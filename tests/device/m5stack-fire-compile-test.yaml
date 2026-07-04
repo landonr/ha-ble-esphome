@@ -32,3 +32,75 @@ sensor:
   - platform: api_ble
     name: "Office Thermostat Local Temperature"
     entity_id: sensor.office_thermostat_local_temperature
+
+  # Local sensor for the bang_bang climate below.
+  - platform: template
+    name: "Fire Temp"
+    id: fire_temp
+    lambda: "return 21.0;"
+    update_interval: 60s
+
+# Phase 4 entity-type coverage on classic ESP32 (Bluedroid): compiles the
+# cover/fan/climate/number/select/button/lock encode/decode paths.
+cover:
+  - platform: template
+    name: "Fire Cover"
+    device_class: shutter
+    has_position: true
+    optimistic: true
+    open_action:
+      - logger.log: "cover open"
+    close_action:
+      - logger.log: "cover close"
+    stop_action:
+      - logger.log: "cover stop"
+
+fan:
+  - platform: template
+    name: "Fire Fan"
+    speed_count: 5
+    preset_modes:
+      - Auto
+      - Sleep
+
+climate:
+  - platform: bang_bang
+    name: "Fire Climate"
+    sensor: fire_temp
+    default_target_temperature_low: 18 °C
+    default_target_temperature_high: 24 °C
+    idle_action:
+      - logger.log: "climate idle"
+    heat_action:
+      - logger.log: "climate heat"
+    cool_action:
+      - logger.log: "climate cool"
+
+number:
+  - platform: template
+    name: "Fire Number"
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+
+select:
+  - platform: template
+    name: "Fire Select"
+    optimistic: true
+    options:
+      - One
+      - Two
+
+button:
+  - platform: template
+    name: "Fire Button"
+    on_press:
+      - logger.log: "button pressed"
+
+lock:
+  - platform: template
+    name: "Fire Lock"
+    optimistic: true
+    lambda: |-
+      return LOCK_STATE_LOCKED;

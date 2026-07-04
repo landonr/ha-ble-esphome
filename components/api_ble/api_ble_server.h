@@ -100,6 +100,24 @@ class APIBLEServer : public Component, public Controller {
 #ifdef USE_LIGHT
   void on_light_update(light::LightState *obj) override;
 #endif
+#ifdef USE_COVER
+  void on_cover_update(cover::Cover *obj) override;
+#endif
+#ifdef USE_FAN
+  void on_fan_update(fan::Fan *obj) override;
+#endif
+#ifdef USE_CLIMATE
+  void on_climate_update(climate::Climate *obj) override;
+#endif
+#ifdef USE_NUMBER
+  void on_number_update(number::Number *obj) override;
+#endif
+#ifdef USE_SELECT
+  void on_select_update(select::Select *obj) override;
+#endif
+#ifdef USE_LOCK
+  void on_lock_update(lock::Lock *obj) override;
+#endif
 #ifdef USE_MEDIA_PLAYER
   void on_media_player_update(media_player::MediaPlayer *obj) override;
 #endif

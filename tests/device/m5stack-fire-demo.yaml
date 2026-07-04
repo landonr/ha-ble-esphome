@@ -161,6 +161,79 @@ switch:
           data:
             entity_id: light.office_lamp_corner
 
+# Phase 4 entity-type live coverage: template/bang_bang entities exported over
+# the BLE API purely to validate the new ListEntities/State/Command paths in
+# Home Assistant (cover, fan, climate, select, button, lock). light + number
+# are already exercised above (backlight/led_bars, spotify_volume).
+cover:
+  - platform: template
+    id: demo_cover
+    name: "Demo Cover"
+    device_class: shade
+    has_position: true
+    optimistic: true
+    open_action:
+      - logger.log: "demo cover: open"
+    close_action:
+      - logger.log: "demo cover: close"
+    stop_action:
+      - logger.log: "demo cover: stop"
+
+fan:
+  - platform: template
+    id: demo_fan
+    name: "Demo Fan"
+    speed_count: 3
+    preset_modes:
+      - Auto
+      - Sleep
+    on_state:
+      - logger.log:
+          format: "demo fan: state=%d speed=%d"
+          args: ["id(demo_fan).state", "id(demo_fan).speed"]
+
+select:
+  - platform: template
+    id: demo_select
+    name: "Demo Select"
+    optimistic: true
+    options:
+      - Red
+      - Green
+      - Blue
+    initial_option: Red
+
+button:
+  - platform: template
+    id: demo_button
+    name: "Demo Button"
+    on_press:
+      - logger.log: "demo button: pressed"
+
+lock:
+  - platform: template
+    id: demo_lock
+    name: "Demo Lock"
+    optimistic: true
+    lock_action:
+      - logger.log: "demo lock: lock"
+    unlock_action:
+      - logger.log: "demo lock: unlock"
+
+climate:
+  - platform: bang_bang
+    id: demo_climate
+    name: "Demo Climate"
+    sensor: office_temp
+    default_target_temperature_low: 19 °C
+    default_target_temperature_high: 23 °C
+    idle_action:
+      - logger.log: "demo climate: idle"
+    heat_action:
+      - logger.log: "demo climate: heat"
+    cool_action:
+      - logger.log: "demo climate: cool"
+
 binary_sensor:
   # GPIO 37-39 are input-only with external pull-ups on the Fire.
   - platform: gpio

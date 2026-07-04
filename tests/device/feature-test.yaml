@@ -95,3 +95,77 @@ light:
     name: "Feature Light"
     id: feature_light
     output: feature_light_output
+
+# Phase 4 entity-type coverage: exercises the ListEntities / SubscribeStates /
+# command paths for cover, fan, climate, number, select, button, lock.
+cover:
+  - platform: template
+    name: "Feature Cover"
+    id: feature_cover
+    device_class: shutter
+    has_position: true
+    optimistic: true
+    open_action:
+      - logger.log: "cover open"
+    close_action:
+      - logger.log: "cover close"
+    stop_action:
+      - logger.log: "cover stop"
+
+fan:
+  - platform: template
+    name: "Feature Fan"
+    id: feature_fan
+    speed_count: 5
+    preset_modes:
+      - Auto
+      - Sleep
+
+climate:
+  - platform: bang_bang
+    name: "Feature Climate"
+    id: feature_climate
+    sensor: feature_sensor
+    default_target_temperature_low: 18 °C
+    default_target_temperature_high: 24 °C
+    idle_action:
+      - logger.log: "climate idle"
+    heat_action:
+      - logger.log: "climate heat"
+    cool_action:
+      - logger.log: "climate cool"
+
+number:
+  - platform: template
+    name: "Feature Number"
+    id: feature_number
+    optimistic: true
+    min_value: 0
+    max_value: 100
+    step: 1
+    unit_of_measurement: "%"
+
+select:
+  - platform: template
+    name: "Feature Select"
+    id: feature_select
+    optimistic: true
+    options:
+      - One
+      - Two
+      - Three
+
+button:
+  - platform: template
+    name: "Feature Button"
+    id: feature_button
+    on_press:
+      - logger.log: "button pressed"
+
+lock:
+  - platform: template
+    name: "Feature Lock"
+    id: feature_lock
+    optimistic: true
+    lambda: |-
+      return LOCK_STATE_LOCKED;
