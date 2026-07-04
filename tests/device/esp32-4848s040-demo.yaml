@@ -1,0 +1,450 @@
+# Guition ESP32-4848S040 demo: native API over BLE, same entity set as the M5
+# Fire demo (m5stack-fire-demo.yaml). This board is an ESP32-S3 with a 480x480
+# ST7701S RGB panel and a GT911 capacitive touchscreen — no physical buttons —
+# so the menu is driven by three touch zones (top=up, middle=select,
+# bottom=down) instead of buttons A/B/C. Deliberately NO wifi and NO api.
+esphome:
+  name: hable-4848s040
+  friendly_name: Hable 4848S040
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  framework:
+    type: esp-idf
+
+# 8MB octal PSRAM — required for the RGB framebuffer.
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+
+esp32_ble:
+
+esp32_ble_server:
+
+api_ble:
+  # Deliberately non-default values so the conn-params-verify log line can
+  # unambiguously show whether the central honored our request (ROADMAP #5).
+  connection:
+    min_interval: 90ms
+    max_interval: 120ms
+    latency: 2
+    timeout: 5s
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+  # Dev/test-only components live under tools/, never in components/ (which
+  # holds only the upstreamable api_ble).
+  - source:
+      type: local
+      path: ../../tools/components
+
+# Dev tool: drive the demo over USB (tools/serial_console.py) so BLE-API
+# commands can be triggered without touching the screen.
+serial_console:
+  on_command:
+    then:
+      - lambda: |-
+          if (x == "lamp on") {
+            id(office_lamp).turn_on();
+          } else if (x == "lamp off") {
+            id(office_lamp).turn_off();
+          } else if (x == "lamp toggle") {
+            id(office_lamp).toggle();
+          } else if (x == "play") {
+            id(spotify_playpause).execute();
+          } else if (x.rfind("vol ", 0) == 0) {
+            auto call = id(spotify_volume).make_call();
+            call.set_value(atof(x.c_str() + 4));
+            call.perform();
+          } else {
+            ESP_LOGW("serial_console", "Unknown command: '%s' (try: lamp on|off|toggle, play, vol N)", x.c_str());
+          }
+
+script:
+  - id: spotify_playpause
+    then:
+      - homeassistant.action:
+          action: media_player.media_play_pause
+          data:
+            entity_id: media_player.spotify_landorghini
+
+# SPI bus carries only the ST7701S init sequence; pixels go out the RGB pins.
+spi:
+  - id: lcd_spi
+    clk_pin: GPIO48
+    mosi_pin: GPIO47
+
+# GT911 capacitive touch controller.
+i2c:
+  - id: touch_i2c
+    sda: GPIO19
+    scl: GPIO45
+    scan: false
+
+output:
+  - platform: ledc
+    pin: GPIO38
+    id: backlight_pwm
+
+light:
+  - platform: monochromatic
+    output: backlight_pwm
+    id: backlight
+    name: "Backlight"
+    restore_mode: ALWAYS_ON
+  # Addressable-LED demo light: an exposed header pin (GPIO40) with nothing
+  # necessarily wired — present so HA has a local light entity to command over
+  # BLE, matching the Fire's "LED Bars".
+  - platform: esp32_rmt_led_strip
+    pin: GPIO40
+    num_leds: 10
+    chipset: SK6812
+    rgb_order: GRB
+    id: led_bars
+    name: "LED Bars"
+
+# HA states imported over the BLE API.
+sensor:
+  - platform: api_ble
+    id: office_temp
+    entity_id: sensor.office_thermostat_local_temperature
+    on_value:
+      - lvgl.label.update:
+          id: lbl_temp
+          text: !lambda |-
+            if (isnan(x))
+              return std::string("Office: --.- C");
+            char buf[32];
+            snprintf(buf, sizeof(buf), "Office: %.1f C", x);
+            return std::string(buf);
+
+text_sensor:
+  - platform: api_ble
+    id: weather_state
+    entity_id: weather.forecast_home
+    on_value:
+      - lvgl.label.update:
+          id: lbl_weather
+          text: !lambda |-
+            std::string w = x;
+            if (w.empty())
+              w = "--";
+            return "Weather: " + w;
+  - platform: api_ble
+    id: spotify_state
+    entity_id: media_player.spotify_landorghini
+    on_value:
+      - lvgl.label.update:
+          id: lbl_spstate
+          text: !lambda |-
+            std::string s = x;
+            if (s.empty())
+              s = "--";
+            return "Spotify: " + s;
+  - platform: api_ble
+    id: spotify_title
+    entity_id: media_player.spotify_landorghini
+    attribute: media_title
+    on_value:
+      - lvgl.label.update:
+          id: lbl_sptitle
+          text: !lambda |-
+            std::string t = x;
+            if (t.empty())
+              t = "--";
+            if (t.size() > 34)
+              t = t.substr(0, 33) + "~";
+            return "> " + t;
+
+# Spotify volume 0-100, pushed to HA on change.
+number:
+  - platform: template
+    id: spotify_volume
+    name: "Spotify Volume"
+    min_value: 0
+    max_value: 100
+    step: 5
+    initial_value: 25
+    optimistic: true
+    set_action:
+      - homeassistant.action:
+          action: media_player.volume_set
+          data:
+            entity_id: media_player.spotify_landorghini
+            volume_level: !lambda |-
+              char buf[8];
+              snprintf(buf, sizeof(buf), "%.2f", x / 100.0f);
+              return std::string(buf);
+
+# Local switch mirroring the office lamp; drives it via homeassistant.action.
+switch:
+  - platform: template
+    id: office_lamp
+    name: "Office Lamp"
+    optimistic: true
+    turn_on_action:
+      - homeassistant.action:
+          action: light.turn_on
+          data:
+            entity_id: light.office_lamp_corner
+    turn_off_action:
+      - homeassistant.action:
+          action: light.turn_off
+          data:
+            entity_id: light.office_lamp_corner
+    # Keep the on-screen LVGL switch in sync with the actual switch state
+    # (HA-driven or command-line toggles), not just on-screen taps.
+    on_turn_on:
+      - lvgl.widget.update:
+          id: lamp_sw
+          state:
+            checked: true
+    on_turn_off:
+      - lvgl.widget.update:
+          id: lamp_sw
+          state:
+            checked: false
+
+# Phase 4 entity-type live coverage: template/bang_bang entities exported over
+# the BLE API purely to validate the new ListEntities/State/Command paths in
+# Home Assistant (cover, fan, climate, select, button, lock). light + number
+# are already exercised above (backlight/led_bars, spotify_volume).
+cover:
+  - platform: template
+    id: demo_cover
+    name: "Demo Cover"
+    device_class: shade
+    has_position: true
+    optimistic: true
+    open_action:
+      - logger.log: "demo cover: open"
+    close_action:
+      - logger.log: "demo cover: close"
+    stop_action:
+      - logger.log: "demo cover: stop"
+
+fan:
+  - platform: template
+    id: demo_fan
+    name: "Demo Fan"
+    speed_count: 3
+    preset_modes:
+      - Auto
+      - Sleep
+    on_state:
+      - logger.log:
+          format: "demo fan: state=%d speed=%d"
+          args: ["id(demo_fan).state", "id(demo_fan).speed"]
+
+select:
+  - platform: template
+    id: demo_select
+    name: "Demo Select"
+    optimistic: true
+    options:
+      - Red
+      - Green
+      - Blue
+    initial_option: Red
+
+button:
+  - platform: template
+    id: demo_button
+    name: "Demo Button"
+    on_press:
+      - logger.log: "demo button: pressed"
+
+lock:
+  - platform: template
+    id: demo_lock
+    name: "Demo Lock"
+    optimistic: true
+    lock_action:
+      - logger.log: "demo lock: lock"
+    unlock_action:
+      - logger.log: "demo lock: unlock"
+
+climate:
+  - platform: bang_bang
+    id: demo_climate
+    name: "Demo Climate"
+    sensor: office_temp
+    default_target_temperature_low: 19 °C
+    default_target_temperature_high: 23 °C
+    idle_action:
+      - logger.log: "demo climate: idle"
+    heat_action:
+      - logger.log: "demo climate: heat"
+    cool_action:
+      - logger.log: "demo climate: cool"
+
+touchscreen:
+  - platform: gt911
+    id: touch
+    i2c_id: touch_i2c
+    display: main_display
+    # The GUITION-4848S040 display model mirrors the panel on both axes (in
+    # hardware, via MADCTL) so the image is upright; the GT911 reports touches
+    # in its raw orientation, so mirror the touch coordinates to match.
+    transform:
+      mirror_x: true
+      mirror_y: true
+
+# LVGL UI (replaces graphical_display_menu). LVGL renders into its own PSRAM
+# draw buffer and flushes only the dirty rectangles into the panel's single
+# live-scanned framebuffer — no full-screen clear, so no white flash — and it
+# reads the touchscreen natively, so the old button-emulation touch zones are
+# gone.
+lvgl:
+  displays:
+    - main_display
+  touchscreens:
+    - touch
+  buffer_size: 25%
+  # byte_order is resolved automatically from the mipi_rgb display metadata.
+  default_font: montserrat_24
+  # Reusable "card" panel so sections read as grouped tiles on the dark
+  # background instead of loose left-aligned text, and one blue accent
+  # (0x3B82F6) instead of the default theme's yellow/pink.
+  style_definitions:
+    - id: card
+      bg_color: 0x1C1C1E
+      bg_opa: cover
+      radius: 12
+      border_width: 0
+      pad_all: 14
+      width: 100%
+  widgets:
+    - obj:
+        width: 100%
+        height: 100%
+        pad_all: 14
+        scrollable: false
+        bg_color: 0x0A0A0A
+        bg_opa: cover
+        border_width: 0
+        layout:
+          type: flex
+          flex_flow: column
+          flex_align_main: start
+          flex_align_cross: start
+          pad_row: 10
+        widgets:
+          - label:
+              text: "Hable 4848S040"
+              text_font: montserrat_30
+              text_color: 0xFFFFFF
+              pad_bottom: 2
+          # Office lamp toggle
+          - obj:
+              styles: card
+              height: size_content
+              scrollable: false
+              layout:
+                type: flex
+                flex_flow: row
+                flex_align_main: space_between
+                flex_align_cross: center
+              widgets:
+                - label:
+                    text: "Office Lamp"
+                    text_color: 0xFFFFFF
+                - switch:
+                    id: lamp_sw
+                    indicator:
+                      checked:
+                        bg_color: 0x3B82F6
+                    on_value:
+                      - lambda: |-
+                          if (x && !id(office_lamp).state)
+                            id(office_lamp).turn_on();
+                          if (!x && id(office_lamp).state)
+                            id(office_lamp).turn_off();
+          # Imported HA state
+          - obj:
+              styles: card
+              height: size_content
+              scrollable: false
+              layout:
+                type: flex
+                flex_flow: column
+                flex_align_cross: start
+                pad_row: 6
+              widgets:
+                - label:
+                    id: lbl_temp
+                    text: "Office: --.- C"
+                    text_color: 0xE5E5E5
+                - label:
+                    id: lbl_weather
+                    text: "Weather: --"
+                    text_color: 0xE5E5E5
+                - label:
+                    id: lbl_spstate
+                    text: "Spotify: --"
+                    text_color: 0xE5E5E5
+                - label:
+                    id: lbl_sptitle
+                    text: "> --"
+                    width: 100%
+                    text_color: 0x9CA3AF
+          # Spotify play/pause
+          - button:
+              id: btn_play
+              width: 100%
+              height: 56
+              radius: 10
+              bg_color: 0x3B82F6
+              bg_opa: cover
+              on_click:
+                - homeassistant.action:
+                    action: media_player.media_play_pause
+                    data:
+                      entity_id: media_player.spotify_landorghini
+              widgets:
+                - label:
+                    text: "Spotify Play / Pause"
+                    text_color: 0xFFFFFF
+                    align: center
+          # Spotify volume
+          - label:
+              id: lbl_vol
+              text: "Volume 25"
+              text_color: 0xE5E5E5
+          - slider:
+              id: vol_slider
+              width: 100%
+              min_value: 0
+              max_value: 100
+              value: 25
+              indicator:
+                bg_color: 0x3B82F6
+              knob:
+                bg_color: 0xFFFFFF
+              on_value:
+                - number.set:
+                    id: spotify_volume
+                    value: !lambda "return x;"
+                - lvgl.label.update:
+                    id: lbl_vol
+                    text:
+                      format: "Volume %.0f"
+                      args: [x]
+
+display:
+  # mipi_rgb's built-in GUITION-4848S040 model (the upstreamed espcontrol
+  # config) bakes in the pins, 12MHz non-inverted pixel clock, mirror_x/y,
+  # data_pins, pixel_mode: 18bit, and the 0xCD=0x00 color-format init — the
+  # things stock st7701s got wrong here (forced 16bit, 0xCD=0x08) that produced
+  # the scrambled colors + fringing. LVGL picks up byte order from its metadata.
+  - platform: mipi_rgb
+    model: GUITION-4848S040
+    id: main_display
+    spi_id: lcd_spi
+    auto_clear_enabled: false
+    update_interval: never
