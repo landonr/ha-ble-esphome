@@ -61,6 +61,11 @@ Dev/test-only device components live in `tools/components/` (e.g.
 `serial_console`), pulled in by demo/test YAMLs as a second
 `external_components` source — never by shippable examples.
 
+## Git
+
+Commit directly to `main` — this is a solo repo; do **not** create a feature
+branch first. No commit-message attribution footers.
+
 ## Deploying to the live HA instance
 
 - Copy `custom_components/hable/` to the HA `config` share over Samba
