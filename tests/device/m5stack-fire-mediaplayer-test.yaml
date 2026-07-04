@@ -1,0 +1,63 @@
+# media_player build + BLE-export coverage (ROADMAP #7).
+# The MediaPlayer Info/State/Command triple is compile-gated in api_ble but was
+# never built with a real speaker platform. This config wires the modern
+# speaker media_player (external I2S DAC + PSRAM audio pipeline) so the
+# ListEntities/State/Command paths are actually compiled and can be exercised
+# over the BLE API. NOTE: BLE-only (no wifi) + no attached amp, so URL playback
+# is not possible on this rig -- volume / mute / pause / state round-trips are
+# what this exercises. The I2S pins are placeholder outputs (no DAC attached).
+esphome:
+  name: hable-m5-mp
+
+esp32:
+  board: m5stack-fire
+  framework:
+    type: esp-idf
+
+# The speaker media_player audio pipeline buffers in PSRAM (the Fire has it).
+psram:
+
+logger:
+
+# The stock speaker media_player hard-requires the `network` component (it is
+# built for WiFi/Ethernet audio streaming). We declare it bare -- no wifi, no
+# connectivity -- purely to satisfy that dependency so the api_ble MediaPlayer
+# Info/State/Command triple compiles and links. Real URL playback is not
+# possible on a BLE-only device; volume/mute/pause/state are the exercisable
+# surface.
+network:
+
+esp32_ble:
+
+esp32_ble_server:
+
+api_ble:
+  encryption:
+    key: "aGFibGUtbm9pc2UtY29tcGlsZS10ZXN0LWtleS0zMiE="
+
+external_components:
+  - source:
+      type: local
+      path: ../../components
+
+i2s_audio:
+  i2s_lrclk_pin: GPIO13
+  i2s_bclk_pin: GPIO26
+
+speaker:
+  - platform: i2s_audio
+    id: fire_speaker
+    dac_type: external
+    i2s_dout_pin: GPIO2
+    sample_rate: 48000
+    bits_per_sample: 16bit
+
+media_player:
+  - platform: speaker
+    name: "Fire Speaker"
+    id: fire_media_player
+    # Only an announcement pipeline (a media pipeline would need a second
+    # source speaker via the `mixer` component; unnecessary for build/BLE
+    # export coverage).
+    announcement_pipeline:
+      speaker: fire_speaker

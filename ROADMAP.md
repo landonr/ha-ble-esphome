@@ -51,8 +51,17 @@ esphome integration prompt for the key).
    (lock/unlock), button (press). Demo entities live in
    `m5stack-fire-demo.yaml`. Base subset was
    binary_sensor / sensor / text_sensor / switch / light.
-7. **media_player**: compile-gate is in place but never built or exercised —
-   add to a test config with a speaker platform.
+7. ~~**media_player**: compile-gate built + exercised~~ — build done
+   2026-07-04. `m5stack-fire-mediaplayer-test.yaml` wires the modern
+   `speaker` media_player (external I2S DAC + PSRAM audio pipeline) so the
+   api_ble MediaPlayer Info/State/Command triple actually compiles and links
+   against a real media_player component. Two hard constraints surfaced and
+   punt real playback to item 16: (a) the stock `speaker` media_player
+   hard-requires the `network` component (WiFi/Ethernet streaming) — declared
+   bare here only to satisfy the dep; (b) internal-DAC output is no longer
+   supported in ESPHome, and the Fire's speaker is internal-DAC. So on a
+   BLE-only device the exercisable surface is volume / mute / pause / state,
+   not URL playback.
 8. **`homeassistant.action` response capture** (`capture_response`,
    `on_success`/`on_error`) — currently rejected at config time.
 9. **esphome-entry linking fallback** in the HA integration: recover when our
@@ -76,6 +85,15 @@ esphome integration prompt for the key).
     `api_ble`; longer-term, the in-tree seam (byte-stream abstraction under
     the api frame helpers) as an upstream PR if hybrid WiFi+BLE is ever
     wanted.
+16. **Playing media over BLE** (deferred from item 7): actual audio playback
+    on a BLE-only device. Blocked on two upstream realities found while
+    building item 7 — the `speaker` media_player hard-requires the `network`
+    component, and ESPHome dropped internal-DAC output (the Fire's speaker is
+    internal-DAC). Needs either an external I2S DAC on the target and a way to
+    stream media bytes over the BLE link (the media pipeline currently assumes
+    network transport), or a rethink of the audio-source path. Only the
+    control surface (volume/mute/pause/state) works over BLE today; the
+    compile gate and BLE export are proven (item 7).
 
 ## Housekeeping
 
