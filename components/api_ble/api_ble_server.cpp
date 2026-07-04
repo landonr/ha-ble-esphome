@@ -17,6 +17,7 @@
 
 #include <esp_gap_ble_api.h>
 #include <esp_gatt_defs.h>
+#include <esp_mac.h>
 
 #include <algorithm>
 #include <cinttypes>
@@ -34,6 +35,8 @@ static const char *const RX_CHARACTERISTIC_UUID = "ab1e0002-e5b0-4c8e-a9f3-6b5c2
 static const char *const TX_CHARACTERISTIC_UUID = "ab1e0003-e5b0-4c8e-a9f3-6b5c2d3e4f01";
 
 APIBLEServer *global_api_ble_server = nullptr;  // NOLINT(cppcoreguidelines-avoid-non-const-global-variables)
+
+void get_bt_mac_raw(uint8_t mac[6]) { esp_read_mac(mac, ESP_MAC_BT); }
 
 APIBLEServer::APIBLEServer() { global_api_ble_server = this; }
 
@@ -129,7 +132,10 @@ void APIBLEServer::gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t
     }
     case ESP_GATTS_MTU_EVT: {
       // The ESPHome BLE wrapper does not surface MTU events, hence our own
-      // handler. Single-central model: track the latest negotiated MTU.
+      // handler. Single-central model: while a connection is active, ignore MTU
+      // events from any other central; otherwise track the latest negotiated MTU.
+      if (this->conn_id_ != INVALID_CONN_ID && param->mtu.conn_id != this->conn_id_)
+        break;
       this->mtu_ = param->mtu.mtu;
       ESP_LOGD(TAG, "MTU negotiated: %u (conn %u)", param->mtu.mtu, param->mtu.conn_id);
       break;
@@ -146,6 +152,9 @@ void APIBLEServer::gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t
     }
     case ESP_GATTS_CONGEST_EVT: {
       // Real TX flow control: the drain pauses while the stack is congested.
+      // Single-central model: ignore congestion events from any other central.
+      if (this->conn_id_ != INVALID_CONN_ID && param->congest.conn_id != this->conn_id_)
+        break;
       this->congested_ = param->congest.congested;
       ESP_LOGV(TAG, "Congestion %s (conn %u)", this->congested_ ? "start" : "end", param->congest.conn_id);
       break;
@@ -180,7 +189,10 @@ void APIBLEServer::gatts_event_handler(esp_gatts_cb_event_t event, esp_gatt_if_t
 
 void APIBLEServer::on_ble_connect_(uint16_t conn_id) {
   if (this->conn_id_ != INVALID_CONN_ID) {
-    ESP_LOGW(TAG, "Second central connected (conn %u); ignoring (single-central model)", conn_id);
+    ESP_LOGW(TAG, "Second central connected (conn %u); dropping (single-central model)", conn_id);
+    // Actively drop it to free the radio slot deterministically rather than
+    // leaving a half-connected central holding a proxy connection.
+    esp_ble_gatts_close(global_ble_server->get_gatts_if(), conn_id);
     return;
   }
   ESP_LOGD(TAG, "Central connected (conn %u)", conn_id);
@@ -202,6 +214,12 @@ void APIBLEServer::on_ble_disconnect_(uint16_t conn_id) {
 void APIBLEServer::open_session_(uint16_t conn_id) {
   if (this->connection_ != nullptr)
     return;  // already open (e.g. CCCD rewritten)
+  if (this->conn_id_ != INVALID_CONN_ID && conn_id != this->conn_id_) {
+    // A second central's CCCD write must not steal the session before the
+    // first central subscribes (single-central model).
+    ESP_LOGV(TAG, "Ignoring CCCD subscribe from second central (conn %u)", conn_id);
+    return;
+  }
   this->conn_id_ = conn_id;
   this->connection_ = std::make_unique<APIBLEConnection>(this);
   this->client_ever_connected_ = true;

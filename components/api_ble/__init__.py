@@ -11,6 +11,7 @@ import esphome.codegen as cg
 from esphome.components import esp32_ble
 from esphome.components.esp32_ble import BTLoggers
 import esphome.config_validation as cv
+import esphome.final_validate as fv
 from esphome.const import (
     CONF_ACTION,
     CONF_ATTRIBUTE,
@@ -55,6 +56,7 @@ CONF_CONNECTION = "connection"
 CONF_MIN_INTERVAL = "min_interval"
 CONF_MAX_INTERVAL = "max_interval"
 CONF_LATENCY = "latency"
+CONF_MAX_CLIENTS = "max_clients"
 
 api_ble_ns = cg.esphome_ns.namespace("api_ble")
 APIBLEServer = api_ble_ns.class_("APIBLEServer", cg.Component)
@@ -126,6 +128,24 @@ CONFIG_SCHEMA = cv.Schema(
         ),
     }
 ).extend(cv.COMPONENT_SCHEMA)
+
+
+def _final_validate(config):
+    # api_ble is single-central by design: the session is keyed off a single
+    # GATT connection and everything downstream assumes one central at a time
+    # (see ARCHITECTURE.md risk 7). esp32_ble_server defaults max_clients to 1,
+    # so the key is always present in the final config; reject anything else.
+    full_config = fv.full_config.get()
+    ble_server_config = full_config.get("esp32_ble_server", {})
+    if (max_clients := ble_server_config.get(CONF_MAX_CLIENTS)) != 1:
+        raise cv.Invalid(
+            f"api_ble is single-central by design (see ARCHITECTURE.md risk 7); "
+            f"esp32_ble_server '{CONF_MAX_CLIENTS}' must be 1, got {max_clients}."
+        )
+    return config
+
+
+FINAL_VALIDATE_SCHEMA = _final_validate
 
 
 async def to_code(config):

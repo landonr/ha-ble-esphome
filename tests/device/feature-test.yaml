@@ -14,6 +14,8 @@ esp32:
 logger:
 
 esp32_ble:
+  # Coexistence compile case: extra connection slots for a bluetooth proxy, etc.
+  max_connections: 3
 
 esp32_ble_server:
 

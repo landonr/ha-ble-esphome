@@ -309,7 +309,9 @@ void APIBLEConnection::on_device_info_request_() {
   // until send_message returns, which encodes within this scope.
   char mac_address[18];
   uint8_t mac[6];
-  get_mac_address_raw(mac);
+  // Report the BT MAC (the BLE-advertised address), not the base eFuse MAC:
+  // HA matches the companion esphome entry by unique_id == format_mac(BLE addr).
+  get_bt_mac_raw(mac);
   format_mac_addr_upper(mac, mac_address);
   resp.mac_address = StringRef(mac_address);
 

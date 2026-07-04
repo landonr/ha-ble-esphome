@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import random
 from typing import Any
 
 from bleak import BleakClient
@@ -240,6 +241,9 @@ class HableBridge:
             delay = RECONNECT_BACKOFF[
                 min(self._reconnect_attempt, len(RECONNECT_BACKOFF) - 1)
             ]
+            # Jitter so N bridges (N devices) don't retry in lockstep after an
+            # HA restart or proxy reboot and contend for scarce proxy slots.
+            delay += random.uniform(0, 1.0)
             self._cancel_fallback_timer = async_call_later(
                 self._hass, delay, self._async_fallback_tick
             )

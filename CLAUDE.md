@@ -106,6 +106,12 @@ entity logic; hable creates/repoints its config entry at `127.0.0.1:<port>`).
   doesn't surface it.
 - Single central; on API `DisconnectRequest` the device drops the whole BLE
   link and resumes advertising.
+- The device's reported MAC (in **both** DeviceInfo and the Noise server-hello)
+  is the **BT MAC** (`esp_read_mac(ESP_MAC_BT)`, the BLE-advertised address),
+  not the base eFuse MAC — it is the linking key HA matches the esphome entry to
+  the hable entry by (`unique_id == format_mac(BLE address)`). Change it nowhere
+  or everywhere (like the UUID rule): both reporters must agree, or aioesphomeapi's
+  cross-check and HA linking break.
 - Initial state dump must send **all** non-internal entities regardless of
   `has_state()` — skipping leaves them `unavailable` in HA (learned in the
   field).

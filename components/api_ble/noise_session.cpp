@@ -4,6 +4,8 @@
 #ifdef USE_API_BLE_NOISE
 #ifdef USE_ESP32
 
+#include "api_ble_server.h"
+
 #include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
@@ -102,8 +104,14 @@ bool NoiseSession::on_handshake_frame(BLEBytePipe &pipe, const uint8_t *body, ui
 bool NoiseSession::send_server_hello_(BLEBytePipe &pipe) {
   // Body: chosen proto (0x01) + node name NUL + node mac NUL.
   const auto &name = App.get_name();
+  // Report the BT MAC (the BLE-advertised address), not the base eFuse MAC:
+  // aioesphomeapi cross-checks this against the DeviceInfo MAC and expected_mac,
+  // and HA matches the companion esphome entry by unique_id == format_mac(BLE
+  // addr). Formatting matches get_mac_address_into_buffer (lowercase, no sep).
   char mac[MAC_ADDRESS_BUFFER_SIZE];
-  get_mac_address_into_buffer(mac);
+  uint8_t mac_raw[6];
+  get_bt_mac_raw(mac_raw);
+  format_mac_addr_lower_no_sep(mac_raw, mac);
 
   size_t name_len = name.size() + 1;  // including NUL
   uint8_t msg[MAX_TX_HANDSHAKE_FRAME];

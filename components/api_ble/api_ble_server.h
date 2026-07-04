@@ -201,6 +201,14 @@ class APIBLEServer : public Component, public Controller {
 #endif
 };
 
+/// Fill `mac` with the device's Bluetooth MAC (base eFuse MAC + BT offset),
+/// which is the address the device advertises over BLE. The HA side matches the
+/// companion esphome config entry by unique_id == format_mac(<BLE address>), so
+/// both the DeviceInfoResponse and the Noise server-hello must report this BT
+/// MAC (not the base eFuse MAC) or discovery and Noise handshake cross-checks
+/// won't line up.
+void get_bt_mac_raw(uint8_t mac[6]);
+
 /// Global pointer for platform components (api_ble sensor/text_sensor) to reach
 /// the server for Home Assistant state subscriptions. Mirrors
 /// api::global_api_server.

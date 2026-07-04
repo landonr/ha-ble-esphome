@@ -70,8 +70,12 @@ One primary service, two characteristics (Nordic-UART-style, custom UUIDs):
 - **Long writes**: `esp32_ble_server` already handles prepared writes (up to
   512 B per attribute value); the RX handler just consumes whatever length
   arrives.
-- **Connections**: one central per device to start (`max_connections: 1`).
-  The slot math (`esp32_ble` `max_connections`, default 3) stays user-tunable.
+- **Connections**: single central per device, now enforced —
+  `api_ble`'s `FINAL_VALIDATE_SCHEMA` rejects `esp32_ble_server` `max_clients`
+  ≠ 1, and runtime guards drop a second central (§8 risk 7). `esp32_ble`'s
+  `max_connections` (default 3) stays user-tunable so other BLE components
+  (e.g. a co-resident bluetooth proxy) can coexist — it only sizes the radio's
+  connection slots, not the API's one-central model.
 
 ### TX flow control
 
@@ -203,6 +207,35 @@ host/port-native end-to-end and `aioesphomeapi` hard-codes `socket.socket`;
 forking the entity layer is large and version-fragile. The byte bridge is ~zero
 protocol surface and survives HA upgrades.
 
+### Multi-device & proxy slot budget
+
+Multiple devices scale by isolation, not by sharing:
+
+- **Per-entry isolation on the HA side.** Each hable config entry owns its own
+  bridge instance — its own `BLEDevice`/GATT connection, its own localhost TCP
+  port and server, its own `_connect_lock`, and its own reconnect state.
+  Nothing is shared across devices, so N devices are N independent single-flight
+  bridges.
+- **`unique_id` is the cross-layer link.** The device reports its **BT MAC**
+  (the BLE-advertised address) in both DeviceInfo and the Noise server-hello,
+  so `format_mac(<BLE advertised address>) == esphome entry unique_id`. hable
+  uses this to bind an esphome entry to a hable entry: it recovers the esphome
+  entry after a lost `entry_id` (unique_id + host==`127.0.0.1` match) and, in
+  the Noise-key case, links the entry once the user finishes the flow in the UI
+  (a one-shot `SIGNAL_CONFIG_ENTRY_CHANGED` listener). (Migration caveat: this
+  changed the reported MAC from the base eFuse MAC, invalidating pre-existing
+  esphome entries — delete the stale esphome entry, keep the hable entry, let
+  it recreate on restart.)
+- **Proxy slot budget.** An ESP32 bluetooth proxy defaults to 3 connection
+  slots. Each `api_ble` device holds one slot **persistently** (the bridge
+  keeps the GATT link up), so N devices behind one proxy leave `3 − N` slots
+  for everything else connectable through it. The current rig — Fire + Guition
+  ESP32-4848S040 — is 2/3. There is no slot allocator: the budget is a
+  deployment constraint the operator sizes (add proxies for more devices).
+- **Reconnect jitter.** Each bridge adds `random.uniform(0, 1.0)` s to its
+  backoff delay so N bridges don't retry in lockstep after an HA restart or
+  proxy reboot and stampede the same scarce proxy slots.
+
 ## 5. Security model
 
 - **Noise optional, mirroring `api:`.** The pipe carries
@@ -278,12 +311,22 @@ The split is deliberate, to keep the upstreaming surface obvious:
    rewritten by hable on every HA start (cross-domain `async_update_entry`) —
    functional but unconventional; watch for esphome integration races at
    startup. Alternative: deterministic per-device ports from a config range.
+   The linking side of this is closed (§4, *Multi-device*): the entry is found
+   by `unique_id == format_mac(BLE address)` + host==`127.0.0.1` when the stored
+   `entry_id` is lost, and in the Noise-key case a one-shot
+   `SIGNAL_CONFIG_ENTRY_CHANGED` listener captures the `entry_id` once the user
+   finishes the flow in the UI; the port is then repointed only when stale.
 6. **WiFi-disabled compile path.** ESPHome without `wifi`/`network` on ESP32 is
    uncommon; other components in a user's config may still drag `network` in.
    The C6 test YAML compiles without WiFi to prove the path.
 7. **One-central model.** HA is the only intended client; the esphome
    integration assumes exclusive API access anyway. Multi-central is explicitly
-   out of scope.
+   out of scope — and now enforced. `FINAL_VALIDATE_SCHEMA` rejects
+   `esp32_ble_server` `max_clients` ≠ 1 at config time, and runtime guards close
+   the session-steal window: MTU/congestion events from a non-active `conn_id`
+   are ignored, a second central's CCCD subscribe can't steal the session, and a
+   second central is actively dropped (`esp_ble_gatts_close`) to free its radio
+   slot rather than left half-connected.
 8. **`CONFLICTS_WITH = ["api"]`** means no hybrid WiFi+BLE API on one device.
    Acceptable for the target use case (BLE replaces WiFi).
 
