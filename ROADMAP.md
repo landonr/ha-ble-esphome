@@ -27,9 +27,13 @@ esphome integration prompt for the key).
 4. ~~**Reconnect latency.**~~ — done. Flat 30 s fallback timer replaced with
    a 1/2/5/10/30 s backoff (`RECONNECT_BACKOFF`) starting 1 s after the BLE
    drop; advertisement callback remains the fast path.
-5. **Verify connection-parameter requests** (`connection:` YAML block) are
-   actually accepted by centrals/proxies; measure battery impact on a
-   battery-powered target.
+5. ~~**Verify connection-parameter requests**~~ — verified 2026-07-04 on the
+   proxy path: esp32_ble swallows `ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT`, so the
+   device now polls `esp_ble_get_current_conn_params()` 5 s after requesting
+   and logs the verdict. Fire (90–120 ms, latency 2) via the XIAO C6 proxy:
+   `Connection params accepted: interval 120 ms, latency 2, timeout 5000 ms`.
+   Still open: macOS/CoreBluetooth central behavior (Apple clamps intervals),
+   and measuring actual battery impact on a battery-powered target.
 
 ## Phase 4 — Completeness
 

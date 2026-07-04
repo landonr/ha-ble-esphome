@@ -189,6 +189,7 @@ void APIBLEServer::on_ble_disconnect_(uint16_t conn_id) {
   if (conn_id != this->conn_id_)
     return;
   ESP_LOGD(TAG, "Central disconnected (conn %u)", conn_id);
+  this->cancel_timeout("conn_params_verify");
   this->close_session_();
   this->conn_id_ = INVALID_CONN_ID;
   this->mtu_ = DEFAULT_MTU;
@@ -233,7 +234,27 @@ void APIBLEServer::request_connection_params_(const uint8_t *remote_bda) {
   esp_err_t err = esp_ble_gap_update_conn_params(&conn_params);
   if (err != ESP_OK) {
     ESP_LOGW(TAG, "esp_ble_gap_update_conn_params failed: %d", err);
+    return;
   }
+  // esp32_ble swallows ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT before dispatch, so
+  // the negotiation result is invisible via callbacks. Instead poll the live
+  // parameters once the link has settled and report requested vs. actual.
+  const uint16_t req_min = conn_params.min_int, req_max = conn_params.max_int;
+  this->set_timeout("conn_params_verify", 5000, [this, req_min, req_max]() {
+    if (this->conn_id_ == INVALID_CONN_ID)
+      return;
+    esp_gap_conn_params_t cur{};
+    if (esp_ble_get_current_conn_params(this->remote_bda_, &cur) != ESP_OK) {
+      ESP_LOGW(TAG, "Could not read current connection params");
+      return;
+    }
+    // interval in 1.25 ms units, timeout in 10 ms units
+    const uint32_t interval_ms = cur.interval * 5 / 4;
+    const bool accepted = cur.interval >= req_min && cur.interval <= req_max && cur.latency == this->conn_latency_;
+    ESP_LOGI(TAG, "Connection params %s: interval %" PRIu32 " ms, latency %u, timeout %u ms (requested %u-%u ms, latency %u)",
+             accepted ? "accepted" : "NOT accepted (central overrode)", interval_ms, cur.latency, cur.timeout * 10,
+             this->conn_min_interval_ms_, this->conn_max_interval_ms_, this->conn_latency_);
+  });
 }
 
 std::string APIBLEServer::peer_address_str_() const {

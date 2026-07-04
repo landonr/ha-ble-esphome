@@ -20,6 +20,13 @@ esp32_ble:
 esp32_ble_server:
 
 api_ble:
+  # Deliberately non-default values so the conn-params-verify log line can
+  # unambiguously show whether the central honored our request (ROADMAP #5).
+  connection:
+    min_interval: 90ms
+    max_interval: 120ms
+    latency: 2
+    timeout: 5s
 
 external_components:
   - source:
