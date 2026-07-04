@@ -1,4 +1,7 @@
 #include "api_ble_server.h"
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+#include "homeassistant_action.h"
+#endif
 
 #ifdef USE_API_BLE
 #ifdef USE_ESP32
@@ -276,6 +279,39 @@ void APIBLEServer::send_homeassistant_action(const api::HomeassistantActionReque
     this->connection_->send_homeassistant_action(req);
   }
 }
+
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+void APIBLEServer::register_action_response_callback(uint32_t call_id, ActionResponseCallback callback) {
+  this->action_response_callbacks_.push_back({call_id, std::move(callback)});
+}
+
+void APIBLEServer::handle_action_response(uint32_t call_id, bool success, StringRef error_message) {
+  for (auto it = this->action_response_callbacks_.begin(); it != this->action_response_callbacks_.end(); ++it) {
+    if (it->call_id == call_id) {
+      auto callback = std::move(it->callback);
+      this->action_response_callbacks_.erase(it);
+      ActionResponse response(success, error_message);
+      callback(response);
+      return;
+    }
+  }
+}
+
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON
+void APIBLEServer::handle_action_response(uint32_t call_id, bool success, StringRef error_message,
+                                          const uint8_t *response_data, size_t response_data_len) {
+  for (auto it = this->action_response_callbacks_.begin(); it != this->action_response_callbacks_.end(); ++it) {
+    if (it->call_id == call_id) {
+      auto callback = std::move(it->callback);
+      this->action_response_callbacks_.erase(it);
+      ActionResponse response(success, error_message, response_data, response_data_len);
+      callback(response);
+      return;
+    }
+  }
+}
+#endif  // USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON
+#endif  // USE_API_HOMEASSISTANT_ACTION_RESPONSES
 
 void APIBLEServer::subscribe_home_assistant_state(const char *entity_id, const char *attribute,
                                                   std::function<void(StringRef)> &&f) {

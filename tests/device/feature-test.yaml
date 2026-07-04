@@ -84,6 +84,35 @@ switch:
           action: light.turn_on
           data:
             entity_id: light.office_lamp_corner
+      # capture_response path: request the JSON response body, with a response
+      # template, and handle both success (with the parsed object) and error.
+      - homeassistant.action:
+          action: weather.get_forecasts
+          data:
+            entity_id: weather.forecast_home
+            type: daily
+          capture_response: true
+          response_template: "{{ response['weather.forecast_home'].forecast[0].temperature }}"
+          on_success:
+            - logger.log:
+                format: "forecast response: %s"
+                args: ["response.size() ? \"got object\" : \"empty\""]
+          on_error:
+            - logger.log:
+                format: "forecast failed: %s"
+                args: ["error.c_str()"]
+    turn_off_action:
+      # Status-only path: on_success / on_error without capture_response.
+      - homeassistant.action:
+          action: light.turn_off
+          data:
+            entity_id: light.office_lamp_corner
+          on_success:
+            - logger.log: "turn_off succeeded"
+          on_error:
+            - logger.log:
+                format: "turn_off failed: %s"
+                args: ["error.c_str()"]
 
 output:
   - platform: gpio

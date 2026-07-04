@@ -34,9 +34,21 @@ from esphome.const import (
 )
 from esphome.core import CORE
 
-CODEOWNERS = ["@landonrohatensky"]  # TODO: placeholder
+DOMAIN = "api_ble"
+CODEOWNERS = ["@landonr"]
 DEPENDENCIES = ["esp32", "esp32_ble_server"]
 CONFLICTS_WITH = ["api"]
+
+
+def AUTO_LOAD(config):
+    """Conditionally auto-load json only when capture_response is used.
+
+    Mirrors the in-tree api component: the flag is set during action config
+    validation in _validate_response_config.
+    """
+    if config and CORE.data.get(DOMAIN, {}).get(CONF_CAPTURE_RESPONSE, False):
+        return ["json"]
+    return []
 
 CONF_ENCRYPTION = "encryption"
 CONF_CONNECTION = "connection"
@@ -184,27 +196,36 @@ async def to_code(config):
 # ---------------------------------------------------------------------------
 # homeassistant.action / homeassistant.service / homeassistant.event
 #
-# Same YAML grammar as the in-tree api component. capture_response / on_success
-# / on_error are NOT yet supported (phase 2) -- using them raises cv.Invalid.
+# Same YAML grammar as the in-tree api component, including action response
+# handling: on_success / on_error track the response the client returns and
+# capture_response requests the JSON response body. The BLE link is a
+# transparent byte pipe, so the HomeassistantActionResponse round-trip needs no
+# extra transport support -- the device just matches call_ids.
 # ---------------------------------------------------------------------------
 
 KEY_VALUE_SCHEMA = cv.Schema({cv.string: cv.templatable(cv.string_strict)})
 
-_UNSUPPORTED_RESPONSE_KEYS = (
-    CONF_CAPTURE_RESPONSE,
-    CONF_RESPONSE_TEMPLATE,
-    CONF_ON_SUCCESS,
-    CONF_ON_ERROR,
-)
 
+def _validate_response_config(config):
+    # Same dependency rules as the in-tree api component:
+    # - response_template requires capture_response: true
+    # - capture_response: true requires on_success
+    if CONF_RESPONSE_TEMPLATE in config and not config[CONF_CAPTURE_RESPONSE]:
+        raise cv.Invalid(
+            f"`{CONF_RESPONSE_TEMPLATE}` requires `{CONF_CAPTURE_RESPONSE}: true` to be set.",
+            path=[CONF_RESPONSE_TEMPLATE],
+        )
 
-def _reject_response_keys(config):
-    for key in _UNSUPPORTED_RESPONSE_KEYS:
-        if key in config:
-            raise cv.Invalid(
-                f"`{key}` is not yet supported by the api_ble homeassistant.action "
-                "(action response handling is a future phase)."
-            )
+    if config[CONF_CAPTURE_RESPONSE] and CONF_ON_SUCCESS not in config:
+        raise cv.Invalid(
+            f"`{CONF_CAPTURE_RESPONSE}: true` requires `{CONF_ON_SUCCESS}` to be set.",
+            path=[CONF_CAPTURE_RESPONSE],
+        )
+
+    # Track capture_response so AUTO_LOAD pulls in the json component.
+    if config[CONF_CAPTURE_RESPONSE]:
+        CORE.data.setdefault(DOMAIN, {})[CONF_CAPTURE_RESPONSE] = True
+
     return config
 
 
@@ -223,17 +244,15 @@ HOMEASSISTANT_ACTION_ACTION_SCHEMA = cv.All(
             cv.Optional(CONF_VARIABLES, default={}): cv.Schema(
                 {cv.string: cv.returning_lambda}
             ),
-            # Accepted so we can raise a clear "not yet supported" error rather
-            # than a generic "extra keys" one.
             cv.Optional(CONF_RESPONSE_TEMPLATE): cv.templatable(cv.string),
-            cv.Optional(CONF_CAPTURE_RESPONSE): cv.boolean,
+            cv.Optional(CONF_CAPTURE_RESPONSE, default=False): cv.boolean,
             cv.Optional(CONF_ON_SUCCESS): automation.validate_automation(single=True),
             cv.Optional(CONF_ON_ERROR): automation.validate_automation(single=True),
         }
     ),
     cv.has_exactly_one_key(CONF_SERVICE, CONF_ACTION),
     cv.rename_key(CONF_SERVICE, CONF_ACTION),
-    _reject_response_keys,
+    _validate_response_config,
 )
 
 
@@ -273,6 +292,41 @@ async def homeassistant_action_to_code(config, action_id, template_arg, args):
     for key, value in config[CONF_VARIABLES].items():
         templ = await cg.templatable(value, args, None)
         cg.add(var.add_variable(cg.FlashStringLiteral(key), templ))
+
+    # Action response handling: on_error / on_success opt into status tracking;
+    # capture_response additionally requests the JSON response body. Mirrors the
+    # in-tree api homeassistant_service_to_code.
+    if on_error := config.get(CONF_ON_ERROR):
+        cg.add_define("USE_API_HOMEASSISTANT_ACTION_RESPONSES")
+        cg.add_define("USE_API_HOMEASSISTANT_ACTION_RESPONSES_ERRORS")
+        cg.add(var.set_wants_status())
+        await automation.build_automation(
+            var.get_error_trigger(),
+            [(cg.std_string, "error"), *args],
+            on_error,
+        )
+
+    if on_success := config.get(CONF_ON_SUCCESS):
+        cg.add_define("USE_API_HOMEASSISTANT_ACTION_RESPONSES")
+        cg.add(var.set_wants_status())
+        if config[CONF_CAPTURE_RESPONSE]:
+            cg.add(var.set_wants_response())
+            cg.add_define("USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON")
+            await automation.build_automation(
+                var.get_success_trigger_with_response(),
+                [(cg.JsonObjectConst, "response"), *args],
+                on_success,
+            )
+
+            if response_template := config.get(CONF_RESPONSE_TEMPLATE):
+                templ = await cg.templatable(response_template, args, cg.std_string)
+                cg.add(var.set_response_template(templ))
+        else:
+            await automation.build_automation(
+                var.get_success_trigger(),
+                args,
+                on_success,
+            )
 
     return var
 

@@ -53,8 +53,19 @@ esphome integration prompt for the key).
    binary_sensor / sensor / text_sensor / switch / light.
 7. **media_player**: compile-gate is in place but never built or exercised —
    add to a test config with a speaker platform.
-8. **`homeassistant.action` response capture** (`capture_response`,
-   `on_success`/`on_error`) — currently rejected at config time.
+8. ~~**`homeassistant.action` response capture** (`capture_response`,
+   `on_success`/`on_error`)~~ — done 2026-07-04. Ports the in-tree api
+   response machinery: `on_success`/`on_error` set a per-call `call_id` on the
+   `HomeassistantActionRequest` and register a callback in `APIBLEServer`;
+   the client's `HomeassistantActionResponse` (msg 130, gated by
+   `USE_API_HOMEASSISTANT_ACTION_RESPONSES`) matches the `call_id` and fires the
+   success/error trigger. `capture_response: true` additionally requests the
+   JSON body (`USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON`, `json` auto-loaded)
+   and fires the success trigger with the parsed object; `response_template`
+   supported. No transport work needed — the response rides the transparent
+   byte pipe. Compile-gated on both families (`feature-test.yaml` C6 + Noise +
+   JSON, `m5stack-fire-compile-test.yaml` classic ESP32). Live validation on
+   the Fire rig still pending.
 9. **esphome-entry linking fallback** in the HA integration: recover when our
    stored entry_id is lost; capture entry_id when the flow finishes in the UI
    (Noise-key case).

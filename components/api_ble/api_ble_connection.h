@@ -216,6 +216,9 @@ class APIBLEConnection {
   void on_subscribe_homeassistant_services_request_();
   void on_subscribe_home_assistant_states_request_();
   void on_home_assistant_state_response_(const uint8_t *data, uint32_t len);
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+  void on_homeassistant_action_response_(const uint8_t *data, uint32_t len);
+#endif
 #ifdef USE_SWITCH
   void on_switch_command_request_(const uint8_t *data, uint32_t len);
 #endif

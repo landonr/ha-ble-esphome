@@ -73,6 +73,19 @@ class APIBLEServer : public Component, public Controller {
   /// (dropped unless the client is service-subscribed -- in-tree semantics).
   void send_homeassistant_action(const api::HomeassistantActionRequest &req);
 
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+  // Action response tracking (mirrors APIServer). A HomeAssistantServiceCallAction
+  // with on_success/on_error registers a callback keyed by the request's call_id;
+  // the matching HomeassistantActionResponse from the client resolves it.
+  using ActionResponseCallback = std::function<void(const class ActionResponse &)>;
+  void register_action_response_callback(uint32_t call_id, ActionResponseCallback callback);
+  void handle_action_response(uint32_t call_id, bool success, StringRef error_message);
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON
+  void handle_action_response(uint32_t call_id, bool success, StringRef error_message, const uint8_t *response_data,
+                              size_t response_data_len);
+#endif  // USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON
+#endif  // USE_API_HOMEASSISTANT_ACTION_RESPONSES
+
   // --- Home Assistant state import registry (mirrors APIServer) ---
   struct HomeAssistantStateSubscription {
     const char *entity_id;  // pointer to flash (from codegen)
@@ -158,6 +171,14 @@ class APIBLEServer : public Component, public Controller {
   uint8_t remote_bda_[6]{};
 
   std::vector<HomeAssistantStateSubscription> state_subs_;
+
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+  struct PendingActionResponse {
+    uint32_t call_id;
+    ActionResponseCallback callback;
+  };
+  std::vector<PendingActionResponse> action_response_callbacks_;
+#endif
 
   uint32_t reboot_timeout_{0};
   uint32_t last_connected_ms_{0};

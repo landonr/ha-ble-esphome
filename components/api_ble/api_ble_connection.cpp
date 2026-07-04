@@ -236,6 +236,11 @@ void APIBLEConnection::dispatch_message_(uint32_t type, const uint8_t *data, uin
     case HomeAssistantStateResponse::MESSAGE_TYPE:  // 40
       this->on_home_assistant_state_response_(data, len);
       break;
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+    case HomeassistantActionResponse::MESSAGE_TYPE:  // 130
+      this->on_homeassistant_action_response_(data, len);
+      break;
+#endif
 #ifdef USE_CLIMATE
     case 48:  // ClimateCommandRequest
       this->on_climate_command_request_(data, len);
@@ -842,6 +847,22 @@ void APIBLEConnection::send_homeassistant_action(const HomeassistantActionReques
     return;
   this->send_message(req);
 }
+
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES
+void APIBLEConnection::on_homeassistant_action_response_(const uint8_t *data, uint32_t len) {
+  HomeassistantActionResponse msg;
+  msg.decode(data, len);
+#ifdef USE_API_HOMEASSISTANT_ACTION_RESPONSES_JSON
+  if (msg.response_data_len > 0) {
+    this->server_->handle_action_response(msg.call_id, msg.success, msg.error_message, msg.response_data,
+                                          msg.response_data_len);
+  } else
+#endif
+  {
+    this->server_->handle_action_response(msg.call_id, msg.success, msg.error_message);
+  }
+}
+#endif  // USE_API_HOMEASSISTANT_ACTION_RESPONSES
 
 // ---------------------------------------------------------------------------
 // Home Assistant state import (HA -> device)
