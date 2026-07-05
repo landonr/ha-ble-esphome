@@ -99,9 +99,16 @@ esphome integration prompt for the key).
     isolation on the HA side (one bridge/port/lock per hable entry), unique_id
     linking with the BT MAC as the cross-layer key, and a `3 − N` slot budget per
     proxy; reconnect jitter (`random.uniform(0, 1.0)` on the backoff) keeps N
-    bridges from retrying in lockstep for scarce slots. Live two-device validation
-    on the Fire + Guition ESP32-4848S040 rig (through the XIAO C6 proxy) still
-    pending.
+    bridges from retrying in lockstep for scarce slots. Live two-device
+    validation done 2026-07-05 on the Fire + Guition ESP32-4848S040 rig through
+    the single XIAO C6 proxy (2/3 slots): both reflashed devices relinked by BT
+    MAC (`3c:61:05:07:3a:46`, `28:84:85:86:1a:ee`), the one-time MAC migration
+    (delete stale esphome entries, hable recreates) worked as documented, both
+    entity sets live concurrently, commands round-tripped on both, and an HA
+    restart relinked both esphome entries to their own fresh ephemeral ports
+    (37747 / 41883) with no cross-linking. Not yet exercised live: the
+    Noise-FORM listener (needs an encrypted reflash) and fault isolation
+    (single-device reboot).
 11. **Deep-sleep / battery device proof**: the original motivation — a
     battery sensor node (e.g. the XIAO C6 once freed from proxy duty) that
     wakes, connects, pushes states, sleeps.
