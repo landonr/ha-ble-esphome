@@ -38,8 +38,7 @@ jobs:
         with:
           category: integration
           # brands: not in home-assistant/brands (custom integration).
-          # topics: drop once GitHub repo topics are set (repo settings).
-          ignore: brands topics
+          ignore: brands
 
   compile:
     name: compile ${{ matrix.config }}
