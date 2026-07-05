@@ -26,6 +26,21 @@ jobs:
       - name: py_compile
         run: python3 -m py_compile custom_components/hable/*.py
 
+  validate:
+    name: hassfest + HACS validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: hassfest
+        uses: home-assistant/actions/hassfest@master
+      - name: HACS validation
+        uses: hacs/action@main
+        with:
+          category: integration
+          # brands: not in home-assistant/brands (custom integration).
+          # topics: drop once GitHub repo topics are set (repo settings).
+          ignore: brands topics
+
   compile:
     name: compile ${{ matrix.config }}
     runs-on: ubuntu-latest

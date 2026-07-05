@@ -17,6 +17,15 @@ See [ARCHITECTURE.md](../../ARCHITECTURE.md) for the full design.
 
 ## Install
 
+### HACS (recommended)
+
+1. HACS → ⋮ (top right) → **Custom repositories**.
+2. Add `https://github.com/landonr/ha-ble-esphome`, type **Integration**.
+3. Search for **Hable** in HACS and install it.
+4. Restart Home Assistant.
+
+### Manual
+
 1. Copy `custom_components/hable/` into your Home Assistant config directory:
    `<config>/custom_components/hable/`.
 2. Restart Home Assistant.

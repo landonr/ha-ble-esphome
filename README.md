@@ -34,8 +34,19 @@ Build with ESPHome >= 2026.6 (vendored proto version; see
 
 ## Quick start (Home Assistant)
 
-Copy `custom_components/hable/` into `/config/custom_components/`, restart HA.
+**HACS** (recommended): HACS → ⋮ → *Custom repositories* → add
+`https://github.com/landonr/ha-ble-esphome` as type *Integration* → install
+**Hable** → restart HA.
+
+**Manual**: copy `custom_components/hable/` into `/config/custom_components/`,
+restart HA.
+
 Devices advertising the Hable service UUID are discovered automatically;
 each gets a companion "stock esphome" entry pointing at the local bridge.
 If your host adapter can't connect (weak USB radios are common), any ESPHome
 bluetooth proxy near the device works. That's the recommended radio.
+
+## Protocol
+
+The BLE wire contract (service/characteristic UUIDs, session lifecycle,
+framing) is published in [docs/GATT_SERVICE.md](docs/GATT_SERVICE.md).

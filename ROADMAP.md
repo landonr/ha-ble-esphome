@@ -124,8 +124,19 @@ esphome integration prompt for the key).
     against pip-pinned ESPHome (version mirrors PROTO_VENDORED.md — bump
     together), PlatformIO cache per target; ruff + `py_compile` job for
     `custom_components/hable`.
-14. **HACS packaging** for `custom_components/hable` (may need repo split or
-    `hacs.json`), install docs, published GATT service spec.
+14. ~~**HACS packaging** for `custom_components/hable` (may need repo split or
+    `hacs.json`), install docs, published GATT service spec.~~ — done
+    2026-07-05, **no repo split**: HACS installs `custom_components/<domain>`
+    straight from the monorepo given a root `hacs.json` (`render_readme`,
+    min HA 2026.6.0). Manifest URLs/codeowners fixed to the real repo
+    (`landonr/ha-ble-esphome`). CI gains a `validate` job (hassfest +
+    `hacs/action`; `brands` ignored — custom integration — and `topics`
+    ignored until repo topics are set on GitHub, then drop it). Install docs:
+    HACS custom-repository steps in both READMEs. GATT wire contract
+    published as `docs/GATT_SERVICE.md` (UUIDs, CCCD-keyed session
+    lifecycle, byte-stream semantics, frame formats, single-central rule,
+    flow control, security model). Remaining (optional): add repo topics,
+    then a `hacs/default` PR for default-store listing.
 15. **Upstreaming assessment**: ESPHome external-component registry for
     `api_ble`; longer-term, the in-tree seam (byte-stream abstraction under
     the api frame helpers) as an upstream PR if hybrid WiFi+BLE is ever
