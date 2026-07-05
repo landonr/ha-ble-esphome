@@ -1,9 +1,26 @@
-# LilyGO T-Display-S3 AMOLED demo: native API over BLE with the same
-# button-driven display menu + entity set as the M5 Fire demo. Two buttons
-# instead of three: BOOT (GPIO0) = up, KEY (GPIO21) short = down, KEY long
-# (>=0.5s) = select. Battery-powered target: battery voltage is on GPIO4
-# through an on-board /2 divider (PIN_BAT_VOLT in LilyGO's factory example),
-# so real voltage + estimated % show on screen and export over the BLE API.
+# LilyGO T-Display-S3 AMOLED demo: native API over BLE with an LVGL UI
+# (replaces graphical_display_menu, which produced a black screen on this
+# RM67162/mipi_spi panel — the page-writer draw path emits nothing here even
+# though the RGB test card renders fine). LVGL renders into its own PSRAM draw
+# buffer and flushes dirty rectangles, and it does its own SOFTWARE rotation,
+# so the panel is left at its native portrait orientation and LVGL rotates to
+# 536x240 landscape (mipi_spi hardware rotation 90/270 needs the MADCTL MV bit,
+# which the RM67162 doesn't actually honor -> black screen).
+#
+# Two buttons drive the UI with no touchscreen:
+#   - GPIO0  (BOOT, on-board pull-up, active low) = KEY_ENTER -> click/activate
+#     the focused widget, via an LVGL keypad input device.
+#   - GPIO21 (KEY, active low) short press (<=0.4s) = focus NEXT widget,
+#     long press (>=0.5s)      = focus PREVIOUS widget.
+# Rationale for the split: an LVGL keypad maps one binary sensor to one key
+# (raw press = key down), so it can't turn a single button's short/long press
+# into two different keys. Activation (ENTER) is a plain press, so it's bound
+# natively on the keypad; NEXT/PREVIOUS navigation is driven from GPIO21's
+# on_multi_click timings into the lvgl.widget.focus action on the default group.
+#
+# Battery-powered target: battery voltage is on GPIO4 through an on-board /2
+# divider (PIN_BAT_VOLT in LilyGO's factory example), so real voltage +
+# estimated % show on screen and export over the BLE API.
 # Deliberately NO wifi and NO api component.
 #
 # No serial_console here: it piggybacks the logger UART, and this board's only
@@ -59,18 +76,20 @@ spi:
   clk_pin: GPIO47
   data_pins: [GPIO18, GPIO7, GPIO48, GPIO5]
 
-font:
-  - file: gfonts://Roboto@500
-    id: font_menu
-    size: 20
-
 # HA states imported over the BLE API.
 sensor:
   - platform: api_ble
     id: office_temp
     entity_id: sensor.office_thermostat_local_temperature
     on_value:
-      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+      - lvgl.label.update:
+          id: lbl_temp
+          text: !lambda |-
+            if (isnan(x))
+              return std::string("Office: --.- C");
+            char buf[32];
+            snprintf(buf, sizeof(buf), "Office: %.1f C", x);
+            return std::string(buf);
   # Battery voltage: GPIO4 reads VBAT/2 via the on-board divider.
   - platform: adc
     pin: GPIO4
@@ -84,7 +103,20 @@ sensor:
     filters:
       - multiply: 2.0
     on_value:
-      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+      # Voltage and % feed one label; read both current states each update.
+      - lvgl.label.update:
+          id: lbl_batt
+          text: !lambda |-
+            float v = id(batt_volt).state;
+            float p = id(batt_pct).state;
+            if (isnan(v))
+              return std::string("Battery: --");
+            char buf[32];
+            if (isnan(p))
+              snprintf(buf, sizeof(buf), "Battery: %.2fV", v);
+            else
+              snprintf(buf, sizeof(buf), "Battery: %.2fV %.0f%%", v, p);
+            return std::string(buf);
   # Rough LiPo state-of-charge from voltage (linear 3.30-4.15 V). Coarse but
   # fine for battery-drain testing; reads high while USB is charging.
   - platform: template
@@ -100,24 +132,59 @@ sensor:
         return NAN;
       float pct = (v - 3.30f) / (4.15f - 3.30f) * 100.0f;
       return clamp(pct, 0.0f, 100.0f);
+    on_value:
+      # Same combined label as batt_volt so the % half refreshes independently.
+      - lvgl.label.update:
+          id: lbl_batt
+          text: !lambda |-
+            float v = id(batt_volt).state;
+            float p = id(batt_pct).state;
+            if (isnan(v))
+              return std::string("Battery: --");
+            char buf[32];
+            if (isnan(p))
+              snprintf(buf, sizeof(buf), "Battery: %.2fV", v);
+            else
+              snprintf(buf, sizeof(buf), "Battery: %.2fV %.0f%%", v, p);
+            return std::string(buf);
 
 text_sensor:
   - platform: api_ble
     id: weather_state
     entity_id: weather.forecast_home
     on_value:
-      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+      - lvgl.label.update:
+          id: lbl_weather
+          text: !lambda |-
+            std::string w = x;
+            if (w.empty())
+              w = "--";
+            return "Weather: " + w;
   - platform: api_ble
     id: spotify_state
     entity_id: media_player.spotify_landorghini
     on_value:
-      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+      - lvgl.label.update:
+          id: lbl_spstate
+          text: !lambda |-
+            std::string s = x;
+            if (s.empty())
+              s = "--";
+            return "Spotify: " + s;
   - platform: api_ble
     id: spotify_title
     entity_id: media_player.spotify_landorghini
     attribute: media_title
     on_value:
-      - lambda: static_cast<esphome::display_menu_base::DisplayMenuComponent *>(id(main_menu))->draw();
+      - lvgl.label.update:
+          id: lbl_sptitle
+          text: !lambda |-
+            std::string t = x;
+            if (t.empty())
+              t = "--";
+            if (t.size() > 30)
+              t = t.substr(0, 29) + "~";
+            return "> " + t;
 
 # Spotify volume 0-100, pushed to HA on change.
 number:
@@ -155,9 +222,22 @@ switch:
           action: light.turn_off
           data:
             entity_id: light.office_lamp_corner
+    # Keep the on-screen LVGL switch in sync with the actual switch state
+    # (HA-driven or command-line toggles), not just on-screen taps.
+    on_turn_on:
+      - lvgl.widget.update:
+          id: lamp_sw
+          state:
+            checked: true
+    on_turn_off:
+      - lvgl.widget.update:
+          id: lamp_sw
+          state:
+            checked: false
 
 binary_sensor:
-  # BOOT button = select; strap pin with on-board pull-up, pressed = low.
+  # BOOT button = KEY_ENTER (click/activate the focused widget), wired into the
+  # LVGL keypad input device below. Strap pin with on-board pull-up, pressed = low.
   - platform: gpio
     pin:
       number: GPIO0
@@ -167,9 +247,8 @@ binary_sensor:
         pullup: true
     id: btn_select
     name: "Button Select"
-    on_press:
-      - display_menu.enter: main_menu
-  # KEY button = next: short press = down, hold >=0.5s = back (up).
+  # KEY button = navigation: short press focuses the next widget, hold >=0.5s
+  # focuses the previous one (see header for why this isn't a keypad mapping).
   - platform: gpio
     pin:
       number: GPIO21
@@ -183,86 +262,214 @@ binary_sensor:
       - timing:
           - ON for at most 0.4s
         then:
-          - display_menu.down: main_menu
+          - lvgl.widget.focus: next
       - timing:
           - ON for at least 0.5s
         then:
-          - display_menu.up: main_menu
+          - lvgl.widget.focus: previous
 
-graphical_display_menu:
-  id: main_menu
-  display: amoled_display
-  font: font_menu
-  active: true
-  items:
-    - type: switch
-      text: "Office Lamp"
-      switch: office_lamp
-      on_text: "ON"
-      off_text: "OFF"
-    - type: label
-      text: !lambda |-
-        float v = id(batt_volt).state;
-        float p = id(batt_pct).state;
-        if (isnan(v))
-          return std::string("Battery: --");
-        char buf[32];
-        if (isnan(p))
-          snprintf(buf, sizeof(buf), "Battery: %.2fV", v);
-        else
-          snprintf(buf, sizeof(buf), "Battery: %.2fV %.0f%%", v, p);
-        return std::string(buf);
-    - type: label
-      text: !lambda |-
-        if (isnan(id(office_temp).state))
-          return std::string("Office: --.- C");
-        char buf[32];
-        snprintf(buf, sizeof(buf), "Office: %.1f C", id(office_temp).state);
-        return std::string(buf);
-    - type: label
-      text: !lambda |-
-        std::string w = id(weather_state).state;
-        if (w.empty())
-          w = "--";
-        return "Weather: " + w;
-    - type: label
-      text: !lambda |-
-        std::string s = id(spotify_state).state;
-        if (s.empty())
-          s = "--";
-        return "Spotify: " + s;
-    - type: label
-      text: !lambda |-
-        std::string t = id(spotify_title).state;
-        if (t.empty())
-          t = "--";
-        if (t.size() > 34)
-          t = t.substr(0, 33) + "~";
-        return "> " + t;
-    - type: command
-      text: "Spotify Play/Pause"
-      on_value:
-        - homeassistant.action:
-            action: media_player.media_play_pause
-            data:
-              entity_id: media_player.spotify_landorghini
-    - type: number
-      text: "Spotify Vol"
-      number: spotify_volume
-      format: "%.0f"
+# LVGL UI (replaces graphical_display_menu). Landscape 536x240 via software
+# rotation. Two side-by-side columns keep everything on one short screen:
+# left = office lamp + imported HA state, right = Spotify controls. The keypad
+# input device gives GPIO0 an ENTER key that activates whichever widget the
+# default focus group currently holds; the three focusable widgets (lamp
+# switch, play/pause button, volume slider) auto-join that default group.
+lvgl:
+  displays:
+    - amoled_display
+  # AMOLED panel has no usable hardware rotation (MADCTL MV unsupported); LVGL
+  # rotates in software. Rotation lives here, NOT on the display block.
+  rotation: 270
+  buffer_size: 25%
+  default_font: montserrat_14
+  keypads:
+    - initial_focus: lamp_sw
+      enter: btn_select
+  # Reusable "card" panel so sections read as grouped tiles on the dark
+  # background instead of loose text, and one blue accent (0x3B82F6).
+  style_definitions:
+    - id: card
+      bg_color: 0x1C1C1E
+      bg_opa: cover
+      radius: 10
+      border_width: 0
+      pad_all: 8
+      width: 100%
+  widgets:
+    - obj:
+        width: 100%
+        height: 100%
+        pad_all: 8
+        scrollable: false
+        bg_color: 0x0A0A0A
+        bg_opa: cover
+        border_width: 0
+        layout:
+          type: flex
+          flex_flow: column
+          flex_align_main: start
+          flex_align_cross: start
+          pad_row: 6
+        widgets:
+          - label:
+              text: "Hable AMOLED"
+              text_font: montserrat_16
+              text_color: 0xFFFFFF
+          # Two columns filling the remaining height.
+          - obj:
+              width: 100%
+              height: 100%
+              flex_grow: 1
+              scrollable: false
+              pad_all: 0
+              bg_opa: transp
+              border_width: 0
+              layout:
+                type: flex
+                flex_flow: row
+                flex_align_cross: start
+                pad_column: 8
+              widgets:
+                # Left column: office lamp toggle + imported HA state.
+                - obj:
+                    width: 50%
+                    height: 100%
+                    scrollable: false
+                    pad_all: 0
+                    bg_opa: transp
+                    border_width: 0
+                    layout:
+                      type: flex
+                      flex_flow: column
+                      flex_align_cross: start
+                      pad_row: 6
+                    widgets:
+                      # Office lamp toggle
+                      - obj:
+                          styles: card
+                          height: size_content
+                          scrollable: false
+                          layout:
+                            type: flex
+                            flex_flow: row
+                            flex_align_main: space_between
+                            flex_align_cross: center
+                          widgets:
+                            - label:
+                                text: "Office Lamp"
+                                text_color: 0xFFFFFF
+                            - switch:
+                                id: lamp_sw
+                                indicator:
+                                  checked:
+                                    bg_color: 0x3B82F6
+                                on_value:
+                                  - lambda: |-
+                                      if (x && !id(office_lamp).state)
+                                        id(office_lamp).turn_on();
+                                      if (!x && id(office_lamp).state)
+                                        id(office_lamp).turn_off();
+                      # Imported HA state
+                      - obj:
+                          styles: card
+                          flex_grow: 1
+                          scrollable: false
+                          layout:
+                            type: flex
+                            flex_flow: column
+                            flex_align_cross: start
+                            pad_row: 3
+                          widgets:
+                            - label:
+                                id: lbl_batt
+                                text: "Battery: --"
+                                text_font: montserrat_12
+                                text_color: 0xE5E5E5
+                            - label:
+                                id: lbl_temp
+                                text: "Office: --.- C"
+                                text_font: montserrat_12
+                                text_color: 0xE5E5E5
+                            - label:
+                                id: lbl_weather
+                                text: "Weather: --"
+                                text_font: montserrat_12
+                                text_color: 0xE5E5E5
+                            - label:
+                                id: lbl_spstate
+                                text: "Spotify: --"
+                                text_font: montserrat_12
+                                text_color: 0xE5E5E5
+                            - label:
+                                id: lbl_sptitle
+                                text: "> --"
+                                width: 100%
+                                text_font: montserrat_12
+                                text_color: 0x9CA3AF
+                # Right column: Spotify controls.
+                - obj:
+                    width: 50%
+                    height: 100%
+                    scrollable: false
+                    pad_all: 0
+                    bg_opa: transp
+                    border_width: 0
+                    layout:
+                      type: flex
+                      flex_flow: column
+                      flex_align_cross: start
+                      pad_row: 6
+                    widgets:
+                      - button:
+                          id: btn_play
+                          width: 100%
+                          height: 48
+                          radius: 10
+                          bg_color: 0x3B82F6
+                          bg_opa: cover
+                          on_click:
+                            - homeassistant.action:
+                                action: media_player.media_play_pause
+                                data:
+                                  entity_id: media_player.spotify_landorghini
+                          widgets:
+                            - label:
+                                text: "Spotify Play / Pause"
+                                text_color: 0xFFFFFF
+                                align: center
+                      - label:
+                          id: lbl_vol
+                          text: "Volume 25"
+                          text_color: 0xE5E5E5
+                      - slider:
+                          id: vol_slider
+                          width: 100%
+                          min_value: 0
+                          max_value: 100
+                          value: 25
+                          indicator:
+                            bg_color: 0x3B82F6
+                          knob:
+                            bg_color: 0xFFFFFF
+                          on_value:
+                            - number.set:
+                                id: spotify_volume
+                                value: !lambda "return x;"
+                            - lvgl.label.update:
+                                id: lbl_vol
+                                text:
+                                  format: "Volume %.0f"
+                                  args: [x]
 
 display:
-  # Native panel is 240x536 portrait; rotate to landscape for the menu.
+  # Native portrait orientation (240x536); LVGL owns the pixels and rotates to
+  # landscape in software, so NO rotation and NO lambda here. auto_clear_enabled
+  # off + update_interval never: LVGL flushes its own dirty rectangles. (The
+  # old graphical_display_menu needed a no-op lambda to buy a buffer and
+  # suppress the RGB test card; LVGL provides its own draw buffer instead.)
   - platform: mipi_spi
     model: T-DISPLAY-S3-AMOLED
     id: amoled_display
     spi_id: quad_spi
-    rotation: 90
-    update_interval: 1s
-    # mipi_spi allocates a draw buffer only for lambda/pages/test-card and
-    # otherwise force-enables the RGB test card — it can't see that
-    # graphical_display_menu draws externally. The no-op lambda buys the
-    # buffer and suppresses the test card; the menu's page replaces it at
-    # setup (ili9xxx on the Fire always buffers, so it never needed this).
-    lambda: |-
-      return;
+    auto_clear_enabled: false
+    update_interval: never
