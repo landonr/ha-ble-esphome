@@ -193,7 +193,7 @@ class APIBLEConnection {
     }
 #ifdef USE_ENTITY_ICON
     char icon_buf[esphome::MAX_ICON_LENGTH];
-    msg.icon = api::StringRef(entity->get_icon_to(icon_buf));
+    msg.icon = esphome::StringRef(entity->get_icon_to(icon_buf));
 #endif
     msg.disabled_by_default = entity->is_disabled_by_default();
     msg.entity_category = static_cast<api::enums::EntityCategory>(entity->get_entity_category());
