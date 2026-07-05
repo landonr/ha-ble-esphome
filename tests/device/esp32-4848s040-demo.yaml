@@ -18,7 +18,10 @@ psram:
   mode: octal
   speed: 80MHz
 
+# UART0 explicitly: the S3 default is USB_SERIAL_JTAG, but this board's USB-C
+# goes through the CH340 on UART0 — that's where logs and serial_console live.
 logger:
+  hardware_uart: UART0
 
 esp32_ble:
 
@@ -64,6 +67,11 @@ serial_console:
           } else {
             ESP_LOGW("serial_console", "Unknown command: '%s' (try: lamp on|off|toggle, play, vol N)", x.c_str());
           }
+
+# No battery telemetry on this board: the IP5306 power-bank IC here is the
+# pin-strap (non-I2C) variant — an I2C scan of the only bus (GPIO19/45) finds
+# just the GT911 (0x14/0x5D), no 0x75 — and no ADC pin is wired to the cell.
+# Battery %/voltage would need a hardware mod (divider into a free ADC pin).
 
 script:
   - id: spotify_playpause
@@ -305,6 +313,8 @@ lvgl:
     - main_display
   touchscreens:
     - touch
+  # RGB panel has no hardware rotation; LVGL rotates in software (touch too).
+  rotation: 270
   buffer_size: 25%
   # byte_order is resolved automatically from the mipi_rgb display metadata.
   default_font: montserrat_24
