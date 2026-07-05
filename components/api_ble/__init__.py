@@ -23,6 +23,7 @@ from esphome.const import (
     CONF_ID,
     CONF_INTERNAL,
     CONF_KEY,
+    CONF_NAME,
     CONF_ON_CLIENT_CONNECTED,
     CONF_ON_CLIENT_DISCONNECTED,
     CONF_ON_ERROR,
@@ -168,6 +169,11 @@ async def to_code(config):
     esp32_ble.register_gatts_event_handler(parent, var)
 
     cg.add(var.set_reboot_timeout(config[CONF_REBOOT_TIMEOUT]))
+
+    # Mirror esp32_ble's optional `name:` override so truncate_adv_name_()
+    # rebuilds the same GAP name esp32_ble set (it exposes no getter for it).
+    if (ble_name := CORE.config.get("esp32_ble", {}).get(CONF_NAME)) is not None:
+        cg.add(var.set_ble_name_override(ble_name))
 
     conn = config[CONF_CONNECTION]
     cg.add(

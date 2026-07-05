@@ -98,7 +98,59 @@ void APIBLEServer::loop() {
   }
 }
 
+// Advertised-name byte budget. The 31-byte scan response already carries the
+// 128-bit service UUID (2 + 16 bytes; esp32_ble copies the adv payload into the
+// scan response) and TX power (3 bytes); a Local Name entry costs another
+// 2 bytes of header, leaving 8 bytes of name payload. Bluedroid drops an
+// oversized Local Name instead of truncating it, so a longer GAP name means no
+// name on the air at all and HA discovery falls back to showing the bare MAC.
+static constexpr size_t MAX_ADV_NAME_LEN = 31 - (2 + 16) - 3 - 2;
+
+void APIBLEServer::truncate_adv_name_() {
+  // Rebuild the GAP name esp32_ble computed during its setup (there is no way
+  // to read it back, see set_ble_name_override): the `name:` override plus MAC
+  // suffix when enabled, otherwise the app name (which already carries the
+  // suffix). Only the first MAX_ADV_NAME_LEN chars are kept, which also makes
+  // esp32_ble's own 20-char cap (first 13 chars + last 7) irrelevant here.
+  const char *base =
+      this->ble_name_override_ != nullptr ? this->ble_name_override_ : App.get_name().c_str();
+  // 7 = '-' plus last 6 MAC chars, appended by esp32_ble to a name override.
+  const bool add_suffix = this->ble_name_override_ != nullptr && App.is_name_add_mac_suffix_enabled();
+  if (strlen(base) + (add_suffix ? 7 : 0) <= MAX_ADV_NAME_LEN)
+    return;  // already fits in the scan response; leave esp32_ble's name alone
+  // With only 8 chars of budget the shared "hable-" node-name prefix would
+  // leave two distinguishing chars; drop it before truncating ("tdisplay"
+  // instead of "hable-td").
+  static constexpr char PREFIX[] = "hable-";
+  if (strncmp(base, PREFIX, sizeof(PREFIX) - 1) == 0)
+    base += sizeof(PREFIX) - 1;
+  char name[MAX_ADV_NAME_LEN + 1];
+  size_t pos = 0;
+  auto append = [&](const char *s, size_t len) {
+    for (; len != 0 && pos < MAX_ADV_NAME_LEN; len--)
+      name[pos++] = *s++;
+  };
+  append(base, strlen(base));
+  if (add_suffix) {
+    char mac[MAC_ADDRESS_BUFFER_SIZE];
+    get_mac_address_into_buffer(mac);
+    append("-", 1);
+    append(mac + 6, 6);
+  }
+  name[pos] = '\0';
+  esp_err_t err = esp_ble_gap_set_device_name(name);
+  if (err != ESP_OK) {
+    ESP_LOGW(TAG, "esp_ble_gap_set_device_name failed: %s", esp_err_to_name(err));
+    return;
+  }
+  ESP_LOGD(TAG, "GAP name truncated to '%s' to fit the scan response", name);
+}
+
 void APIBLEServer::setup_service_() {
+  // Must happen before the service starts: starting an advertised service
+  // triggers advertising (re)configuration, which snapshots the GAP name.
+  this->truncate_adv_name_();
+
   ESP_LOGD(TAG, "Creating native API service");
   this->service_ = global_ble_server->create_service(ESPBTUUID::from_raw(SERVICE_UUID), /*advertise=*/true);
 

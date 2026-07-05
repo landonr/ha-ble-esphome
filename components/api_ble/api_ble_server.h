@@ -57,6 +57,13 @@ class APIBLEServer : public Component, public Controller {
   const std::array<uint8_t, 32> &get_noise_psk() const { return this->noise_psk_; }
 #endif
 
+  /// esp32_ble's optional `name:` override, mirrored from YAML by codegen.
+  /// truncate_adv_name_() needs the base GAP name esp32_ble computed, but
+  /// esp32_ble exposes no getter and its GAP dispatch does not forward
+  /// ESP_GAP_BLE_GET_DEV_NAME_COMPLETE_EVT, so the name cannot be read back.
+  /// nullptr when not configured (the app name is used instead).
+  void set_ble_name_override(const char *name) { this->ble_name_override_ = name; }
+
   /// Raw GATTS events, registered with esp32_ble via codegen (the ESPHome BLE
   /// wrapper does not surface MTU events, so we track ESP_GATTS_MTU_EVT
   /// ourselves; also used for the peer address on connect and the CCCD
@@ -148,6 +155,7 @@ class APIBLEServer : public Component, public Controller {
   static constexpr uint16_t DEFAULT_MTU = 23;
 
   void setup_service_();
+  void truncate_adv_name_();
   void on_ble_connect_(uint16_t conn_id);
   void on_ble_disconnect_(uint16_t conn_id);
   void open_session_(uint16_t conn_id);
@@ -179,6 +187,10 @@ class APIBLEServer : public Component, public Controller {
   };
   std::vector<PendingActionResponse> action_response_callbacks_;
 #endif
+
+  /// esp32_ble `name:` override (pointer to a string literal in flash), see
+  /// set_ble_name_override().
+  const char *ble_name_override_{nullptr};
 
   uint32_t reboot_timeout_{0};
   uint32_t last_connected_ms_{0};
