@@ -117,8 +117,13 @@ esphome integration prompt for the key).
 
 12. **Proto re-vendor script**: regenerate `api_pb2.*` from a given ESPHome
     checkout (documents the pinned version; see PROTO_VENDORED.md).
-13. **CI**: compile matrix (ESP32-C6 + classic ESP32) against the pinned
-    ESPHome release; `py_compile`/ruff for the HA integration.
+13. ~~**CI**: compile matrix (ESP32-C6 + classic ESP32) against the pinned
+    ESPHome release; `py_compile`/ruff for the HA integration.~~ — done
+    2026-07-05. `.github/workflows/ci.yml`: compile matrix over `xiao-c6`,
+    `feature-test` (C6) and `m5stack-fire-compile-test` (classic ESP32)
+    against pip-pinned ESPHome (version mirrors PROTO_VENDORED.md — bump
+    together), PlatformIO cache per target; ruff + `py_compile` job for
+    `custom_components/hable`.
 14. **HACS packaging** for `custom_components/hable` (may need repo split or
     `hacs.json`), install docs, published GATT service spec.
 15. **Upstreaming assessment**: ESPHome external-component registry for

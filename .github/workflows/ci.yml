@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# The compile matrix pins the same ESPHome release the vendored proto layer
+# was copied from (components/api_ble/PROTO_VENDORED.md) — bump both together.
+env:
+  ESPHOME_VERSION: 2026.6.4
+
+jobs:
+  python:
+    name: HA integration (ruff + py_compile)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Ruff
+        uses: astral-sh/ruff-action@v3
+        with:
+          args: check custom_components/hable
+      - name: py_compile
+        run: python3 -m py_compile custom_components/hable/*.py
+
+  compile:
+    name: compile ${{ matrix.config }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - xiao-c6            # ESP32-C6 (RISC-V / NimBLE-era radio)
+          - feature-test       # ESP32-C6, all entity types + Noise
+          - m5stack-fire-compile-test  # classic ESP32 (Bluedroid)
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+      - name: Install ESPHome (pinned)
+        run: pip install "esphome==${ESPHOME_VERSION}"
+      - name: Cache PlatformIO / build dir
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            tests/device/.esphome
+          key: pio-${{ matrix.config }}-esphome${{ env.ESPHOME_VERSION }}-${{ hashFiles('tests/device/*.yaml') }}
+          restore-keys: |
+            pio-${{ matrix.config }}-esphome${{ env.ESPHOME_VERSION }}-
+      - name: Validate config
+        run: esphome config tests/device/${{ matrix.config }}.yaml
+      - name: Compile
+        run: esphome compile tests/device/${{ matrix.config }}.yaml

@@ -25,7 +25,7 @@ from homeassistant.helpers.device_registry import format_mac
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 
 from .bridge import HableBridge, HableBridgeError
-from .const import BRIDGE_HOST, CONF_ADDRESS, CONF_ESPHOME_ENTRY_ID, CONF_NAME, DOMAIN
+from .const import BRIDGE_HOST, CONF_ADDRESS, CONF_ESPHOME_ENTRY_ID, CONF_NAME
 
 _LOGGER = logging.getLogger(__name__)
 
